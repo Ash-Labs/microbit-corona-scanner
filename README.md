@@ -1,12 +1,9 @@
-# microbit-beacon-finder
+# microbit-corona-scanner
 
-The micro:bit finds various of BLE Beacons, and display the ID to LEDs.
+The micro:bit finds BLE Beacons according to the Google/Apple COVID-19 Exposure Notification specification (https://www.blog.google/documents/70/Exposure_Notification_-_Bluetooth_Specification_v1.2.2.pdf)
 
-## Supported Beacons
-* iBeacon
-* AltBeacon
-* Eddystone-UID
-* Eddystone-URL
+## What does it do?
+Currently there's just blinking LEDs if Exposure Notification Beacons are found.
 
 ## How to Build
 This project uses yotta to build, not pxt.
