@@ -14,13 +14,13 @@ Follow these steps to build the project.
 
 ```bash
 # set target to use S130 SoftDevice.
-yt target bbc-microbit-classic-gcc-s130
+yotta target bbc-microbit-classic-gcc-s130
 
 # the linker uses `NRF51822.ld` file, then copy `NRF51822_S130.ld` to `NRF51822.ld`.
 cp yotta_targets/bbc-microbit-classic-gcc-s130/ld/NRF51822_S130.ld yotta_targets/bbc-microbit-classic-gcc-s130/ld/NRF51822.ld
 
 # build the project
-yt build
+yotta build
 
 # transfer the hex file to micro:bit. (for example, macOS X)
 cp build/bbc-microbit-classic-gcc-s130/source/microbit-ble-bridge-combined.hex /Volumes/MICROBIT/microbit-ble-bridge-combined.hex
