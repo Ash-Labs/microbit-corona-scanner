@@ -14,7 +14,7 @@
       "ble-nrf51822": "lancaster-university/nrf51822#v2.5.0+mb7",
       "nrf51-sdk": "lancaster-university/nrf51-sdk#v2.2.0+mb4",
       "microbit-dal": "lancaster-university/microbit-dal#v2.0.0-rc10",
-      "microbit": "lancaster-university/microbit"
+      "microbit": "lancaster-university/microbit#v2.0.0-rc11"
     },
   "targetDependencies": {},
   "bin": "./source"
