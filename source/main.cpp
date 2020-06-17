@@ -20,7 +20,12 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	
 	/* match Exposure Notification Service Class UUID 0xFD6F 
 	 * 
-	 * spec: https://www.blog.google/documents/70/Exposure_Notification_-_Bluetooth_Specification_v1.2.2.pdf page 4 */
+	 * spec: https://www.blog.google/documents/70/Exposure_Notification_-_Bluetooth_Specification_v1.2.2.pdf page 4 
+	 * 
+	 * example:
+	 * 03 03 6ffd 
+	 * 17 16 6ffd 660a6af67f7e946b3c3ce253dae9b411 78b0e9c2 (rpi, aem)
+	 * */
 	if((len == 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd)) {
 		uBit.display.printChar(last ? '.' : ',');
 		last ^= 1;
