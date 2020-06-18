@@ -13,19 +13,9 @@
 
 MicroBit uBit;
 
+/*
 static unsigned long last_rx = 0;
 static uint32_t rxcount = 0;
-
-struct rpi_s {
-	long last_seen;
-	uint16_t rpi_start;
-	uint8_t rssi;
-	uint8_t rfu;
-};
-
-/* TODO: sorted list of last_seen -> rpi entry mapping for entry reuse */
-
-static struct rpi_s rpi_list[25];
 
 void timer(void) {
 	static uint32_t last_rxcount = 0;
@@ -41,7 +31,6 @@ void timer(void) {
 	}
 }
 
-/*
 #define MIN(a,b) (((a)<=(b))?(a):(b))
 
 uint8_t last_rssi = 255;
@@ -57,6 +46,109 @@ void rssi_test(const uint8_t rssi) {
 }
 */
 
+struct rpi_s {
+	//long last_seen;
+	uint16_t short_rpi;
+	uint8_t rssi;
+	uint8_t active;
+	
+	/* tiny age-sorted linked list w/o pointers to save precious RAM */
+	uint8_t older;
+	uint8_t newer;
+};
+
+/* TODO: sorted list of last_seen -> rpi entry mapping for entry reuse */
+#define RPI_N 			25
+
+static struct rpi_s 	rpi_list[RPI_N];
+static uint8_t 			oldest_rpi = 0;
+static uint8_t 			newest_rpi = RPI_N - 1;
+
+static void rpi_list_init(void) {
+	struct rpi_s *rpi = rpi_list;
+	int i;
+	
+	/* initialize linked list for aging */
+	for(i=0; i<RPI_N; i++,rpi++) {
+		rpi->older = (i-1)&0xff;
+		rpi->newer = i+1;
+	}
+}
+
+static void refresh_screen(unsigned long now) {
+	static unsigned long last_refresh = 0;
+	
+	if(now - last_refresh < 20)
+		return;
+	
+	else {
+		struct rpi_s *rpi = rpi_list;
+		uint16_t x,y;
+		uint8_t v;
+
+		last_refresh = now;
+		//MicroBitImage image(5,5);
+
+		for(x=0;x<5;x++) {
+			for(y=0;y<5;y++,rpi++) {
+				//v = (now - rpi->last_seen) > 20 ? 0 : 255;
+				//image.setPixelValue(x,y,v);
+				if(!rpi->active)
+					continue;
+				rpi->active--;
+				if(!rpi->active)
+					uBit.display.image.setPixelValue(x,y,0);
+			}
+		}
+		
+		//uBit.display.printAsync(image);
+	}
+}
+
+static void seen(uint16_t short_rpi, uint8_t rssi, unsigned long now) {
+	struct rpi_s *rpi = rpi_list;
+	uint16_t x,y;
+	int idx;
+	
+	/* try to find rpi in list */
+	for(idx=0;(rpi->short_rpi != short_rpi) && (idx<RPI_N);idx++,rpi++) { }
+	
+	/* allocate rpi if not seen yet */
+	if(idx == RPI_N) {
+		/* reuse oldest rpi slot */
+		idx = oldest_rpi;
+		rpi = rpi_list + idx;
+		rpi->short_rpi = short_rpi;
+	}
+	
+	/* nothing to do if already newest rpi */
+	if(idx != newest_rpi) {
+		
+		/* remove from chain */
+		rpi_list[rpi->newer].older = rpi->older;
+		if(idx == oldest_rpi)
+			oldest_rpi = rpi->newer;
+		else
+			rpi_list[rpi->older].newer = rpi->newer;
+
+		/* assign as newest rpi */
+		rpi->newer = rpi_list[newest_rpi].newer;
+		rpi_list[newest_rpi].newer = idx;
+		rpi->older = newest_rpi;
+		newest_rpi = idx;
+	}
+	
+	//rpi->last_seen = now;
+	rpi->active = 5;
+	rpi->rssi = rssi;
+	
+	x = idx/5;
+	y = idx%5;
+	uBit.display.image.setPixelValue(x,y,255);
+	
+	//refresh_screen(now);
+}
+
 static uint8_t nibble2hex(uint8_t n) {
 	return (n + ((n < 10) ? ('0') : ('a' - 10)));
 }
@@ -71,7 +163,7 @@ static char *tohex(char *dst, const uint8_t *src, uint32_t n) {
 	return dst;
 }
 
-void exposure_to_uart(const uint8_t *rpi_aem, uint8_t rssi) {
+static void exposure_to_uart(const uint8_t *rpi_aem, uint8_t rssi) {
 	char buf[64];
 	char *p=tohex(buf, rpi_aem, 16);
 	*p=' ';
@@ -92,10 +184,19 @@ void exposure_to_uart(const uint8_t *rpi_aem, uint8_t rssi) {
  * ~5m  distance + wall: 158
  * ~8m distance + 2x wall: 158
  */
-void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi) {
-	last_rx = uBit.systemTime();
+static void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi) {
+	uint16_t short_rpi = (rpi_aem[0]<<8)|rpi_aem[1];
+	unsigned long now = uBit.systemTime();
+	
+	seen(short_rpi, rssi, now);
+	
+	/* test */
+	/*
+	last_rx = now;
 	uBit.display.printChar('.');
 	rxcount++;
+	*/
+	
 	exposure_to_uart(rpi_aem, rssi);
 }
 
@@ -120,6 +221,7 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 }
 
 int main() {
+	rpi_list_init();
 	
 	uBit.serial.setTxBufferSize(64);
 	
@@ -131,8 +233,9 @@ int main() {
 
     while (true) {
         //uBit.ble->waitForEvent();
-		uBit.sleep(50);
-		timer();
+		uBit.sleep(20);
+		//timer();
+		refresh_screen(uBit.systemTime());
     }
     return 0;
 }
