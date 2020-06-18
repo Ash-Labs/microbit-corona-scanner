@@ -13,41 +13,49 @@
 
 MicroBit uBit;
 
-/*
-static unsigned long last_rx = 0;
-static uint32_t rxcount = 0;
+static int uart_enabled = 0;
+static int greyscale = 1;
 
-void timer(void) {
-	static uint32_t last_rxcount = 0;
-	
-	if(rxcount == last_rxcount)
-		return;
-	else {
-		unsigned long now = uBit.systemTime();
-		if(now - last_rx > 50) {
-			last_rxcount = rxcount;
-			uBit.display.printChar(' ');
-		}
+static void greyscale_enable(void) {
+	greyscale = 1;
+	uBit.display.setDisplayMode(DISPLAY_MODE_GREYSCALE);
+}
+
+static void greyscale_disable(void) {
+	greyscale = 0;
+	uBit.display.setDisplayMode(DISPLAY_MODE_BLACK_AND_WHITE);
+}
+
+void onButton(MicroBitEvent e) {
+	if (e.source == MICROBIT_ID_BUTTON_A)
+		uart_enabled ^= 1;
+
+    if (e.source == MICROBIT_ID_BUTTON_B) {
+		if(greyscale)
+			greyscale_disable();
+		else
+			greyscale_enable();
 	}
 }
 
-#define MIN(a,b) (((a)<=(b))?(a):(b))
+#define MAX(a,b)	((a)>=(b)?(a):(b))
+#define MIN(a,b)	((a)<=(b)?(a):(b))
 
-uint8_t last_rssi = 255;
-uint8_t min_rssi = 255;
+#define MIN_RSSI		158
+#define MIN_BRIGHTNESS	16
+#define MAX_BRIGHTNESS	255
 
-void rssi_test(const uint8_t rssi) {
-	char buf[8];
-	if(uBit.systemTime() - last_rx < 5000)
-		return;
-	last_rx = uBit.systemTime();
-	sprintf(buf,"%03d",rssi);
-	uBit.display.scrollAsync(rssi);
+static uint8_t scale_rssi(uint8_t rssi) {
+	uint32_t res = MAX(rssi, MIN_RSSI);
+	res -= MIN_RSSI;
+	res = MIN(res, 255-MIN_RSSI);
+	res*=5;
+	res>>=1; /* scale */
+	res+=MIN_BRIGHTNESS;
+	return MIN(res, MAX_BRIGHTNESS);
 }
-*/
 
 struct rpi_s {
-	//long last_seen;
 	uint16_t short_rpi;
 	uint8_t rssi;
 	uint8_t active;
@@ -57,7 +65,6 @@ struct rpi_s {
 	uint8_t newer;
 };
 
-/* TODO: sorted list of last_seen -> rpi entry mapping for entry reuse */
 #define RPI_N 			25
 
 static struct rpi_s 	rpi_list[RPI_N];
@@ -87,12 +94,9 @@ static void refresh_screen(unsigned long now) {
 		uint8_t v;
 
 		last_refresh = now;
-		//MicroBitImage image(5,5);
 
 		for(x=0;x<5;x++) {
 			for(y=0;y<5;y++,rpi++) {
-				//v = (now - rpi->last_seen) > 20 ? 0 : 255;
-				//image.setPixelValue(x,y,v);
 				if(!rpi->active)
 					continue;
 				rpi->active--;
@@ -100,8 +104,6 @@ static void refresh_screen(unsigned long now) {
 					uBit.display.image.setPixelValue(x,y,0);
 			}
 		}
-		
-		//uBit.display.printAsync(image);
 	}
 }
 
@@ -138,15 +140,12 @@ static void seen(uint16_t short_rpi, uint8_t rssi, unsigned long now) {
 		newest_rpi = idx;
 	}
 	
-	//rpi->last_seen = now;
 	rpi->active = 5;
 	rpi->rssi = rssi;
 	
 	x = idx/5;
 	y = idx%5;
-	uBit.display.image.setPixelValue(x,y,255);
-	
-	//refresh_screen(now);
+	uBit.display.image.setPixelValue(x,y,greyscale ? scale_rssi(rssi) : 255);
 }
 
 static uint8_t nibble2hex(uint8_t n) {
@@ -190,14 +189,8 @@ static void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi) {
 	
 	seen(short_rpi, rssi, now);
 	
-	/* test */
-	/*
-	last_rx = now;
-	uBit.display.printChar('.');
-	rxcount++;
-	*/
-	
-	exposure_to_uart(rpi_aem, rssi);
+	if(uart_enabled)
+		exposure_to_uart(rpi_aem, rssi);
 }
 
 /* see https://os.mbed.com/docs/mbed-os/v5.15/mbed-os-api-doxy/struct_gap_1_1_advertisement_callback_params__t.html */
@@ -225,6 +218,12 @@ int main() {
 	
 	uBit.serial.setTxBufferSize(64);
 	
+	if(greyscale)
+		greyscale_enable();
+
+    uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onButton);
+    uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_LONG_CLICK, onButton);
+	
     uBit.ble = new BLEDevice();
     uBit.ble->init();
 
@@ -234,7 +233,6 @@ int main() {
     while (true) {
         //uBit.ble->waitForEvent();
 		uBit.sleep(20);
-		//timer();
 		refresh_screen(uBit.systemTime());
     }
     return 0;
