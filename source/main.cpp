@@ -13,10 +13,26 @@
 
 MicroBit uBit;
 
+static unsigned long last_rx = 0;
+static uint32_t rxcount = 0;
+
+void timer(void) {
+	static uint32_t last_rxcount = 0;
+	
+	if(rxcount == last_rxcount)
+		return;
+	else {
+		unsigned long now = uBit.systemTime();
+		if(now - last_rx > 50) {
+			last_rxcount = rxcount;
+			uBit.display.printChar(' ');
+		}
+	}
+}
+
 void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
     const uint8_t len = params->advertisingDataLen;
 	const uint8_t *p = params->advertisingData;
-	static int last = 0;
 	
 	/* match Exposure Notification Service Class UUID 0xFD6F 
 	 * 
@@ -27,22 +43,23 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	 * 17 16 6ffd 660a6af67f7e946b3c3ce253dae9b411 78b0e9c2 (rpi, aem)
 	 * */
 	if((len == 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd)) {
-		uBit.display.printChar(last ? '.' : ',');
-		last ^= 1;
+		last_rx = uBit.systemTime();
+		uBit.display.printChar('.');
+		rxcount++;
 	}
 }
 
-int main()
-{
+int main() {
     uBit.ble = new BLEDevice();
     uBit.ble->init();
 
     uBit.ble->gap().setScanParams(500, 400);
     uBit.ble->gap().startScan(advertisementCallback);
 
-    while (true)
-    {
-        uBit.ble->waitForEvent();
+    while (true) {
+        //uBit.ble->waitForEvent();
+		uBit.sleep(50);
+		timer();
     }
     return 0;
 }
