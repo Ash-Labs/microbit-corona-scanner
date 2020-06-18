@@ -13,6 +13,8 @@
 
 MicroBit uBit;
 
+static uint32_t rpi_counter = 0;
+
 static int uart_enabled = 0;
 static int greyscale = 1;
 
@@ -91,7 +93,6 @@ static void refresh_screen(unsigned long now) {
 	else {
 		struct rpi_s *rpi = rpi_list;
 		uint16_t x,y;
-		uint8_t v;
 
 		last_refresh = now;
 
@@ -107,7 +108,7 @@ static void refresh_screen(unsigned long now) {
 	}
 }
 
-static void seen(uint16_t short_rpi, uint8_t rssi, unsigned long now) {
+static void seen(uint16_t short_rpi, uint8_t rssi) {
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
 	int idx;
@@ -117,6 +118,7 @@ static void seen(uint16_t short_rpi, uint8_t rssi, unsigned long now) {
 	
 	/* allocate rpi if not seen yet */
 	if(idx == RPI_N) {
+		rpi_counter++;
 		/* reuse oldest rpi slot */
 		idx = oldest_rpi;
 		rpi = rpi_list + idx;
@@ -162,9 +164,11 @@ static char *tohex(char *dst, const uint8_t *src, uint32_t n) {
 	return dst;
 }
 
-static void exposure_to_uart(const uint8_t *rpi_aem, uint8_t rssi) {
+static void exposure_to_uart(const uint8_t *rpi_aem, uint8_t rssi, unsigned long now) {
 	char buf[64];
-	char *p=tohex(buf, rpi_aem, 16);
+	char *p = buf;
+	//p+=sprintf(buf, "[%10ld] ",now);
+	p=tohex(p, rpi_aem, 16);
 	*p=' ';
 	p=tohex(p+1, rpi_aem+16, 4);
 	*p=' ';
@@ -187,10 +191,10 @@ static void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi) {
 	uint16_t short_rpi = (rpi_aem[0]<<8)|rpi_aem[1];
 	unsigned long now = uBit.systemTime();
 	
-	seen(short_rpi, rssi, now);
+	seen(short_rpi, rssi);
 	
 	if(uart_enabled)
-		exposure_to_uart(rpi_aem, rssi);
+		exposure_to_uart(rpi_aem, rssi, now);
 }
 
 /* see https://os.mbed.com/docs/mbed-os/v5.15/mbed-os-api-doxy/struct_gap_1_1_advertisement_callback_params__t.html */
@@ -214,9 +218,21 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 }
 
 int main() {
+	uint32_t now = uBit.systemTime();
+	uint32_t last_cntprint = now;
+	//uint32_t nv_rpi_counter = 0, last_nvwrite = now;
+
 	rpi_list_init();
 	
 	uBit.serial.setTxBufferSize(64);
+	
+	/* load non-volatile rpi counter (if available) */
+	/*
+	KeyValuePair* rpi_cnt_storage = uBit.storage.get("rpi_counter");
+	if(rpi_cnt_storage)
+		memcpy(&nv_rpi_counter, rpi_cnt_storage->value, sizeof(uint32_t));
+	rpi_counter = nv_rpi_counter;
+	*/
 	
 	if(greyscale)
 		greyscale_enable();
@@ -232,8 +248,29 @@ int main() {
 
     while (true) {
         //uBit.ble->waitForEvent();
+		
 		uBit.sleep(20);
-		refresh_screen(uBit.systemTime());
+		
+		now = uBit.systemTime();
+		refresh_screen(now);
+
+#if 0		
+		/* update non-volatile rpi counter at most once per second */
+		if((rpi_counter > nv_rpi_counter) && ((now - last_nvwrite) > 1000)) {
+			nv_rpi_counter = rpi_counter;
+			last_nvwrite = now;
+			// doesn't work yet?
+			//uBit.storage.put("rpi_counter", (uint8_t *)&nv_rpi_counter, sizeof(uint32_t));
+		}
+#endif
+		
+		/* output rpi counter every 10 seconds */
+		if((now - last_cntprint) >= 10000) {
+			char buf[32];
+			last_cntprint = now;
+			sprintf(buf,"RPIs seen: %ld\r\n",(unsigned long)rpi_counter);
+			uBit.serial.send(buf, ASYNC);
+		}
     }
     return 0;
 }
