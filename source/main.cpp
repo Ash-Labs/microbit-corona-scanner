@@ -69,6 +69,7 @@ void rssi_test(const uint8_t rssi) {
  * ~8m distance + 2x wall: 158
  */
 
+/* see https://os.mbed.com/docs/mbed-os/v5.15/mbed-os-api-doxy/struct_gap_1_1_advertisement_callback_params__t.html */
 void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
     const uint8_t len = params->advertisingDataLen;
 	const uint8_t *p = params->advertisingData;
