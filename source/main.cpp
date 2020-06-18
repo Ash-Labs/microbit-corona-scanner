@@ -16,6 +16,17 @@ MicroBit uBit;
 static unsigned long last_rx = 0;
 static uint32_t rxcount = 0;
 
+struct rpi_s {
+	long last_seen;
+	uint16_t rpi_start;
+	uint8_t rssi;
+	uint8_t rfu;
+};
+
+/* TODO: sorted list of last_seen -> rpi entry mapping for entry reuse */
+
+static struct rpi_s rpi_list[25];
+
 void timer(void) {
 	static uint32_t last_rxcount = 0;
 	
@@ -33,6 +44,7 @@ void timer(void) {
 void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
     const uint8_t len = params->advertisingDataLen;
 	const uint8_t *p = params->advertisingData;
+	const uint8_t rssi = params->rssi; /* use for LED brightness */
 	
 	/* match Exposure Notification Service Class UUID 0xFD6F 
 	 * 
