@@ -57,6 +57,30 @@ void rssi_test(const uint8_t rssi) {
 }
 */
 
+static uint8_t nibble2hex(uint8_t n) {
+	return (n + ((n < 10) ? ('0') : ('a' - 10)));
+}
+
+static char *tohex(char *dst, const uint8_t *src, uint32_t n) {
+	for(;n--;src++,dst++) {
+		uint8_t v = *src;
+		*dst = nibble2hex(v>>4);
+		dst++;
+		*dst = nibble2hex(v&0xf);
+	}
+	return dst;
+}
+
+void exposure_to_uart(const uint8_t *rpi_aem, uint8_t rssi) {
+	char buf[64];
+	char *p=tohex(buf, rpi_aem, 16);
+	*p=' ';
+	p=tohex(p+1, rpi_aem+16, 4);
+	*p=' ';
+	sprintf(p+1,"%03d\r\n",rssi);
+	uBit.serial.send(buf, ASYNC);
+}
+
 /* RSSI:
  * 
  * min RSSI: 158
@@ -68,13 +92,20 @@ void rssi_test(const uint8_t rssi) {
  * ~5m  distance + wall: 158
  * ~8m distance + 2x wall: 158
  */
+void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi) {
+	last_rx = uBit.systemTime();
+	uBit.display.printChar('.');
+	rxcount++;
+	exposure_to_uart(rpi_aem, rssi);
+}
 
 /* see https://os.mbed.com/docs/mbed-os/v5.15/mbed-os-api-doxy/struct_gap_1_1_advertisement_callback_params__t.html */
 void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
     const uint8_t len = params->advertisingDataLen;
 	const uint8_t *p = params->advertisingData;
+	const uint8_t *rpi_aem = p+8;
 	const uint8_t rssi = params->rssi; /* use for LED brightness */
-		
+	
 	/* match Exposure Notification Service Class UUID 0xFD6F 
 	 * 
 	 * spec: https://www.blog.google/documents/70/Exposure_Notification_-_Bluetooth_Specification_v1.2.2.pdf page 4 
@@ -84,19 +115,14 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	 * 17 16 6ffd 660a6af67f7e946b3c3ce253dae9b411 78b0e9c2 (rpi, aem)
 	 * */
 	if((len == 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd)) {
-		//last_rssi = rssi;
-		//min_rssi = MIN(min_rssi, rssi);
-
-//		rssi_test(rssi);
-//		return;
-
-		last_rx = uBit.systemTime();
-		uBit.display.printChar('.');
-		rxcount++;
+		exposure_rx(rpi_aem, rssi);
 	}
 }
 
 int main() {
+	
+	uBit.serial.setTxBufferSize(64);
+	
     uBit.ble = new BLEDevice();
     uBit.ble->init();
 
@@ -107,8 +133,6 @@ int main() {
         //uBit.ble->waitForEvent();
 		uBit.sleep(50);
 		timer();
-		//uBit.sleep(200);
-		//uBit.serial.printf("rssi %d min %d\r\n",last_rssi,min_rssi);
     }
     return 0;
 }
