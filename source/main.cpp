@@ -37,7 +37,7 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	const uint8_t *rxd = params->advertisingData;
 	const uint8_t rssi = params->rssi;
 	char buf[250], *p=buf;
-	static int c='.';
+	static char c='.';
 	
 	p+=sprintf(buf, "%3d %3d ", rssi, len);
 	p=tohex(p, rxd, MIN(len, 100));
