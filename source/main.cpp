@@ -11,6 +11,11 @@
 #error use of the serial port by MICROBIT_DBG clashes with our use of the serial port - not uspported
 #endif
 
+extern "C" {
+#include "device_manager.h"
+uint32_t btle_set_gatt_table_size(uint32_t size);
+}
+
 MicroBit uBit;
 
 static uint32_t rpi_counter = 0;
@@ -239,6 +244,8 @@ int main() {
 
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onButton);
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_LONG_CLICK, onButton);
+	
+	btle_set_gatt_table_size(BLE_GATTS_ATTR_TAB_SIZE_MIN);
 	
     uBit.ble = new BLEDevice();
     uBit.ble->init();

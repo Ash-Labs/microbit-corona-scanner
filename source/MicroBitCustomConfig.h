@@ -18,7 +18,8 @@
 
 // The lowest address of memory that is safe to use as heap storage when BLE is ENABLED
 // Used to define the base of the heap when MICROBIT_HEAP_REUSE_SD is defined.
-#define MICROBIT_HEAP_BASE_BLE_ENABLED          0x20002500			// S130 build value
-#define MICROBIT_HEAP_BASE_BLE_DISABLED         MICROBIT_HEAP_BASE_BLE_ENABLED  // Force the MicrobitHeapAllocator not to use all the S130 memory
+// this is used nowhere it seems?
+//#define MICROBIT_HEAP_BASE_BLE_ENABLED          0x20002500			// S130 build value
+//#define MICROBIT_HEAP_BASE_BLE_DISABLED         MICROBIT_HEAP_BASE_BLE_ENABLED  // Force the MicrobitHeapAllocator not to use all the S130 memory
 
 #endif

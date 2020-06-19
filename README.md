@@ -23,7 +23,7 @@ Follow these steps to build the project.
 yotta target bbc-microbit-classic-gcc-s130
 
 # the linker uses `NRF51822.ld` file, then copy `NRF51822_S130.ld` to `NRF51822.ld`.
-cp yotta_targets/bbc-microbit-classic-gcc-s130/ld/NRF51822_S130.ld yotta_targets/bbc-microbit-classic-gcc-s130/ld/NRF51822.ld
+cp NRF51822_S130.ld yotta_targets/bbc-microbit-classic-gcc-s130/ld/NRF51822.ld
 
 # build the project
 yotta build
