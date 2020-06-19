@@ -1,7 +1,7 @@
 {
-  "name": "microbit-ble-bridge",
-  "version": "0.0.2-dev01",
-  "description": "A BLE to USB Serial bridge for the micro:bit, using a micro:bit",
+  "name": "corona-scanner",
+  "version": "0.0.1-dev01",
+  "description": "A BLE scanner for corona exposure notifications using a micro:bit",
   "licenses": [
     {
       "url": "https://spdx.org/licenses/Apache-2.0",

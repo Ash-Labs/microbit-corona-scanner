@@ -29,5 +29,5 @@ cp NRF51822_S130.ld yotta_targets/bbc-microbit-classic-gcc-s130/ld/NRF51822.ld
 yotta build
 
 # transfer the hex file to micro:bit. (for example, macOS X)
-cp build/bbc-microbit-classic-gcc-s130/source/microbit-ble-bridge-combined.hex /Volumes/MICROBIT/microbit-ble-bridge-combined.hex
+cp build/bbc-microbit-classic-gcc-s130/source/corona-scanner-combined.hex /Volumes/MICROBIT/
 ```
