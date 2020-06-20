@@ -2,6 +2,9 @@
 
 The micro:bit finds BLE Beacons according to the Google/Apple COVID-19 Exposure Notification specification (https://www.blog.google/documents/70/Exposure_Notification_-_Bluetooth_Specification_v1.2.2.pdf)
 
+## Video
+[![usage video](https://img.youtube.com/vi/39K_UgLI7oA/0.jpg)](https://www.youtube.com/watch?v=39K_UgLI7oA)
+
 ## What does it do?
 LEDs indicate received Exposure Notification beacons. There's one LED per Rolling Proximity Identifier (RPI) so up to 25 active RPIs with all 25 LEDs.
 
