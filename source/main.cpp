@@ -274,6 +274,7 @@ static void randomize_age(void) {
  * - stretch fadeout from RSSI to zero in RSSI-mode?
  * - gamma correction?
  * - add audio output?
+ * - make number of active RPIs accessible via BLE?
 */
 
 int main() {
