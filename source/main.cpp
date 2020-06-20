@@ -16,38 +16,48 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
+struct rpi_s {
+	uint16_t short_rpi;
+	uint8_t rssi;
+	uint8_t age;
+	
+	/* tiny age-sorted linked list w/o pointers to save precious RAM */
+	uint8_t older;
+	uint8_t newer;
+};
+
+#define RPI_N 						25
+
+static struct rpi_s rpi_list[RPI_N];
+static uint8_t 		oldest_rpi 		= 0;
+static uint8_t 		newest_rpi 		= RPI_N - 1;
+
+static void rpi_list_init(void) {
+	struct rpi_s *rpi = rpi_list;
+	int i;
+	
+	/* initialize linked list for aging */
+	for(i=0; i<RPI_N; i++,rpi++) {
+		rpi->older = (i-1)&0xff;
+		rpi->newer = i+1;
+		rpi->short_rpi = i;
+		rpi->age = 255;
+	}
+}
+
 MicroBit uBit;
 
 static uint32_t rpi_counter = 0;
 
-static int uart_enabled = 0;
-static int greyscale = 1;
+#define MIN_RSSI					158
+#define MIN_BRIGHTNESS				16
+#define MAX_BRIGHTNESS				255
 
-static void greyscale_enable(void) {
-	greyscale = 1;
-	uBit.display.setDisplayMode(DISPLAY_MODE_GREYSCALE);
-}
+#define RPI_AGE_TIMEOUT				(50*2)		/* 50 equals 1 second */
 
-static void greyscale_disable(void) {
-	greyscale = 0;
-	uBit.display.setDisplayMode(DISPLAY_MODE_BLACK_AND_WHITE);
-}
-
-void onButton(MicroBitEvent e) {
-	if (e.source == MICROBIT_ID_BUTTON_A)
-		uart_enabled ^= 1;
-
-    if (e.source == MICROBIT_ID_BUTTON_B) {
-		if(greyscale)
-			greyscale_disable();
-		else
-			greyscale_enable();
-	}
-}
-
-#define MIN_RSSI		158
-#define MIN_BRIGHTNESS	16
-#define MAX_BRIGHTNESS	255
+static uint8_t uart_enabled 		= 0;
+static uint8_t greyscale 			= 1;
+static uint8_t rpi_age_fadeout 		= 5; //RPI_AGE_TIMEOUT;
 
 static uint8_t scale_rssi(uint8_t rssi) {
 	uint32_t res = MAX(rssi, MIN_RSSI);
@@ -59,54 +69,28 @@ static uint8_t scale_rssi(uint8_t rssi) {
 	return MIN(res, MAX_BRIGHTNESS);
 }
 
-struct rpi_s {
-	uint16_t short_rpi;
-	uint8_t rssi;
-	uint8_t active;
-	
-	/* tiny age-sorted linked list w/o pointers to save precious RAM */
-	uint8_t older;
-	uint8_t newer;
-};
-
-#define RPI_N 			25
-
-static struct rpi_s 	rpi_list[RPI_N];
-static uint8_t 			oldest_rpi = 0;
-static uint8_t 			newest_rpi = RPI_N - 1;
-
-static void rpi_list_init(void) {
-	struct rpi_s *rpi = rpi_list;
-	int i;
-	
-	/* initialize linked list for aging */
-	for(i=0; i<RPI_N; i++,rpi++) {
-		rpi->older = (i-1)&0xff;
-		rpi->newer = i+1;
-		rpi->short_rpi = i;
-	}
+/* smoothly fade out aged RPIs :) */
+static uint8_t calc_brightness(const rpi_s *rpi) {
+	uint8_t rssi = rpi->rssi;
+	uint8_t age = rpi->age;
+	if(age >= rpi_age_fadeout)
+		return 0;
+	else if(greyscale)
+		return scale_rssi(rssi);
+	else
+		return 255;
 }
 
 static void refresh_screen(unsigned long now) {
-	static unsigned long last_refresh = 0;
-	
-	if(now - last_refresh < 20)
-		return;
-	
-	else {
-		struct rpi_s *rpi = rpi_list;
-		uint16_t x,y;
+	struct rpi_s *rpi = rpi_list;
+	uint16_t x,y;
 
-		last_refresh = now;
-
-		for(x=0;x<5;x++) {
-			for(y=0;y<5;y++,rpi++) {
-				if(!rpi->active)
-					continue;
-				rpi->active--;
-				if(!rpi->active)
-					uBit.display.image.setPixelValue(x,y,0);
-			}
+	for(x=0;x<5;x++) {
+		for(y=0;y<5;y++,rpi++) {
+			if(rpi->age > RPI_AGE_TIMEOUT)
+				continue;
+			rpi->age++;
+			uBit.display.image.setPixelValue(x,y,calc_brightness(rpi));
 		}
 	}
 }
@@ -145,12 +129,15 @@ static void seen(uint16_t short_rpi, uint8_t rssi) {
 		newest_rpi = idx;
 	}
 	
-	rpi->active = 5;
 	rpi->rssi = rssi;
+	if(!rssi)
+		return;
+		
+	rpi->age = 0;
 	
 	x = idx/5;
 	y = idx%5;
-	uBit.display.image.setPixelValue(x,y,greyscale ? scale_rssi(rssi) : 255);
+	uBit.display.image.setPixelValue(x,y,calc_brightness(rpi));
 }
 
 static uint8_t nibble2hex(uint8_t n) {
@@ -217,6 +204,28 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	 * */
 	if((len == 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd)) {
 		exposure_rx(rpi_aem, rssi);
+	}
+}
+
+static void greyscale_enable(void) {
+	greyscale = 1;
+	uBit.display.setDisplayMode(DISPLAY_MODE_GREYSCALE);
+}
+
+static void greyscale_disable(void) {
+	greyscale = 0;
+	uBit.display.setDisplayMode(DISPLAY_MODE_BLACK_AND_WHITE);
+}
+
+void onButton(MicroBitEvent e) {
+	if (e.source == MICROBIT_ID_BUTTON_A)
+		uart_enabled ^= 1;
+
+    if (e.source == MICROBIT_ID_BUTTON_B) {
+		if(greyscale)
+			greyscale_disable();
+		else
+			greyscale_enable();
 	}
 }
 
