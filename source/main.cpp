@@ -47,7 +47,7 @@ static void rpi_list_init(void) {
 
 MicroBit uBit;
 
-static uint32_t rpi_counter = 0;
+static uint32_t rpis_seen 			= 0;
 
 #define MIN_RSSI					158
 #define MIN_BRIGHTNESS				16
@@ -81,18 +81,21 @@ static uint8_t calc_brightness(const rpi_s *rpi) {
 		return 255;
 }
 
-static void refresh_screen(unsigned long now) {
+static uint8_t refresh_screen(unsigned long now) {
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
+	uint8_t rpis_active = 0;
 
 	for(x=0;x<5;x++) {
 		for(y=0;y<5;y++,rpi++) {
 			if(rpi->age > RPI_AGE_TIMEOUT)
 				continue;
+			rpis_active++;
 			rpi->age++;
 			uBit.display.image.setPixelValue(x,y,calc_brightness(rpi));
 		}
 	}
+	return rpis_active;
 }
 
 static void seen(uint16_t short_rpi, uint8_t rssi) {
@@ -105,7 +108,7 @@ static void seen(uint16_t short_rpi, uint8_t rssi) {
 	
 	/* allocate rpi if not seen yet */
 	if(idx == RPI_N) {
-		rpi_counter++;
+		rpis_seen++;
 		/* reuse oldest rpi slot */
 		idx = oldest_rpi;
 		rpi = rpi_list + idx;
@@ -274,12 +277,14 @@ int main() {
     uBit.ble->gap().startScan(advertisementCallback);
 
     while (true) {
+		uint8_t rpis_active = 0;
+		
         //uBit.ble->waitForEvent();
 		
 		uBit.sleep(20);
 		
 		now = uBit.systemTime();
-		refresh_screen(now);
+		rpis_active = refresh_screen(now);
 
 #if 0		
 		/* update non-volatile rpi counter at most once per second */
@@ -293,9 +298,9 @@ int main() {
 		
 		/* output rpi counter every 10 seconds */
 		if((now - last_cntprint) >= 10000) {
-			char buf[32];
+			char buf[48];
 			last_cntprint = now;
-			sprintf(buf,"RPIs seen: %ld\r\n",(unsigned long)rpi_counter);
+			sprintf(buf,"RPIs active: %2d seen: %ld\r\n",rpis_active, (unsigned long)rpis_seen);
 			uBit.serial.send(buf, ASYNC);
 		}
     }
