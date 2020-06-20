@@ -47,6 +47,7 @@ static void rpi_list_init(void) {
 
 MicroBit uBit;
 
+static uint8_t rx_activity			= 0;
 static uint32_t rpis_seen 			= 0;
 
 #define MIN_RSSI					158
@@ -60,6 +61,7 @@ static uint8_t rpi_age_fadeout 		= RPI_AGE_TIMEOUT;
 #define CF_UART_EN					(1<<0)
 #define CF_RSSI_BRIGHTNESS			(1<<1)
 #define CF_FADEOUT_EN				(1<<2)
+#define CF_CLICK_EN					(1<<3)
 static uint8_t config				= 0;
 
 static uint8_t scale_rssi(uint8_t rssi) {
@@ -197,6 +199,8 @@ static void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi) {
 	
 	if(config & CF_UART_EN)
 		exposure_to_uart(rpi_aem, rssi, now);
+
+	rx_activity++;
 }
 
 /* see https://os.mbed.com/docs/mbed-os/v5.15/mbed-os-api-doxy/struct_gap_1_1_advertisement_callback_params__t.html */
@@ -249,9 +253,14 @@ static void mode_change(void) {
 	uBit.display.setDisplayMode(config&CF_RSSI_BRIGHTNESS ? DISPLAY_MODE_GREYSCALE : DISPLAY_MODE_BLACK_AND_WHITE);
 }
 
-void onButton(MicroBitEvent e) {
+void onLongClick(MicroBitEvent e) {
 	if (e.source == MICROBIT_ID_BUTTON_A)
 		config ^= CF_UART_EN;
+}
+
+void onClick(MicroBitEvent e) {
+	if (e.source == MICROBIT_ID_BUTTON_A)
+		config ^= CF_CLICK_EN;
 
     if (e.source == MICROBIT_ID_BUTTON_B)
 		mode_change();
@@ -280,6 +289,7 @@ static void randomize_age(void) {
 int main() {
 	uint32_t now = uBit.systemTime();
 	uint32_t last_cntprint = now;	
+	uint8_t rxact_last = 0, sleep_time = 20;
 
 	uBit.serial.setTxBufferSize(64);
 
@@ -287,8 +297,9 @@ int main() {
 	randomize_age();
 	mode_change();
 	
-    uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onButton);
-    uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onButton);
+    uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onClick);
+    uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onClick);
+	uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
 	
 	btle_set_gatt_table_size(BLE_GATTS_ATTR_TAB_SIZE_MIN);
 	
@@ -298,11 +309,14 @@ int main() {
     uBit.ble->gap().setScanParams(500, 400);
     uBit.ble->gap().startScan(advertisementCallback);
 
+	uBit.io.P0.setAnalogValue(0);
+	uBit.io.P0.setAnalogPeriodUs(1000000/1000);
+
     while (true) {
 		uint8_t rpis_active = 0;
 		
-		uBit.sleep(20);
-		
+		uBit.sleep(sleep_time);
+				
 		now = uBit.systemTime();
 		rpis_active = refresh_screen(now);
 		
@@ -312,6 +326,17 @@ int main() {
 			last_cntprint = now;
 			sprintf(buf,"RPIs active: %2d seen: %ld\r\n",rpis_active, (unsigned long)rpis_seen);
 			uBit.serial.send(buf, ASYNC);
+		}
+		
+		sleep_time = 20;
+		if(rxact_last != rx_activity) {
+			rxact_last = rx_activity;
+			if(config & CF_CLICK_EN) {
+				uBit.io.P0.setAnalogValue(512);
+				uBit.sleep(1);
+				uBit.io.P0.setAnalogValue(0);
+				sleep_time = 19;
+			}
 		}
     }
     return 0;
