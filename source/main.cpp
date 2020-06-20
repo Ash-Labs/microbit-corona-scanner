@@ -220,34 +220,33 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 }
 
 /* modes:
- * 0: blink at full brightness
- * 1: fade from RSSI				[DEFAULT]
- * 2: blink with RSSI brightness
- * 3: fade from full brightness
+ * 0: persistence with fadeout from RSSI				[DEFAULT]
+ * 1: blink with RSSI brightness
+ * 2: persistence at full brightness
+ * 3: blink at full brightness
  */
 static void mode_change(void) {
-	static uint8_t mode = 0;
+	static uint8_t mode = 3;
 	
 	mode++;
 	mode&=3;
-	
-	/* all mode except blink at full brightness need greyscale enabled */
-	uBit.display.setDisplayMode(mode ? DISPLAY_MODE_GREYSCALE : DISPLAY_MODE_BLACK_AND_WHITE);
-	
-	/* RSSI brightness or full brightness? */
-	if((mode == 1) || (mode == 2))
-		config |= CF_RSSI_BRIGHTNESS;
-	else
-		config &= ~CF_RSSI_BRIGHTNESS;
-	
+
 	/* fadeout? */
-	if(mode&1)
+	if(!mode)
 		config |= CF_FADEOUT_EN;
 	else
 		config &= ~CF_FADEOUT_EN;
 	
-	/* fadeout over 2 seconds vs. short blinks */
-	rpi_age_fadeout = (config & CF_FADEOUT_EN) ? RPI_AGE_TIMEOUT : 5;
+	/* short blinks vs. inactive after 2 seconds */
+	rpi_age_fadeout = (mode&1) ? 5 : RPI_AGE_TIMEOUT;
+	
+	/* RSSI brightness or full brightness? */
+	if (mode&2)
+		config &= ~CF_RSSI_BRIGHTNESS;
+	else
+		config |= CF_RSSI_BRIGHTNESS;
+	
+	uBit.display.setDisplayMode(config&CF_RSSI_BRIGHTNESS ? DISPLAY_MODE_GREYSCALE : DISPLAY_MODE_BLACK_AND_WHITE);
 }
 
 void onButton(MicroBitEvent e) {
@@ -269,6 +268,13 @@ static void randomize_age(void) {
 		}
 	}
 }
+
+/* TODO list:
+ * - change RSSI -> brightness mapping?
+ * - stretch fadeout from RSSI to zero in RSSI-mode?
+ * - gamma correction?
+ * - add audio output?
+*/
 
 int main() {
 	uint32_t now = uBit.systemTime();

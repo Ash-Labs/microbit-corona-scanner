@@ -11,10 +11,10 @@ LEDs indicate received Exposure Notification beacons. There's one LED per Rollin
 The number of RPIs seen is output every 10 seconds via the USB serial port.
 
 Press *B* to change visualisation mode:
- * 1: fade from RSSI				[DEFAULT]
- * 2: blink with RSSI brightness
- * 3: fade from full brightness
- * 4: blink at full brightness
+ * 0: persistence with fadeout from RSSI				[DEFAULT]
+ * 1: blink with RSSI brightness
+ * 2: persistence at full brightness
+ * 3: blink at full brightness
 
 Press *A* for 3 seconds to see all received Exposure Notifications via the USB serial port (format is RPI, AEM, RSSI). Press again for 3 seconds to disable.
 
