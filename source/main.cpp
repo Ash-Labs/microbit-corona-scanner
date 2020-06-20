@@ -54,10 +54,13 @@ static uint32_t rpis_seen 			= 0;
 #define MAX_BRIGHTNESS				255
 
 #define RPI_AGE_TIMEOUT				(50*2)		/* 50 equals 1 second */
+static uint8_t rpi_age_fadeout 		= 5; 		//RPI_AGE_TIMEOUT;
 
-static uint8_t uart_enabled 		= 0;
-static uint8_t greyscale 			= 1;
-static uint8_t rpi_age_fadeout 		= 5; //RPI_AGE_TIMEOUT;
+/* config bits */
+#define CF_UART_EN					(1<<0)
+#define CF_GREYSCALE_EN				(1<<1)
+#define CF_FADEOUT_EN				(1<<2)
+static uint8_t config				= CF_GREYSCALE_EN;
 
 static uint8_t scale_rssi(uint8_t rssi) {
 	uint32_t res = MAX(rssi, MIN_RSSI);
@@ -75,7 +78,7 @@ static uint8_t calc_brightness(const rpi_s *rpi) {
 	uint8_t age = rpi->age;
 	if(age >= rpi_age_fadeout)
 		return 0;
-	else if(greyscale)
+	else if(config & CF_GREYSCALE_EN)
 		return scale_rssi(rssi);
 	else
 		return 255;
@@ -186,7 +189,7 @@ static void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi) {
 	
 	seen(short_rpi, rssi);
 	
-	if(uart_enabled)
+	if(config & CF_UART_EN)
 		exposure_to_uart(rpi_aem, rssi, now);
 }
 
@@ -211,21 +214,21 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 }
 
 static void greyscale_enable(void) {
-	greyscale = 1;
+	config |= CF_GREYSCALE_EN;
 	uBit.display.setDisplayMode(DISPLAY_MODE_GREYSCALE);
 }
 
 static void greyscale_disable(void) {
-	greyscale = 0;
+	config &= ~CF_GREYSCALE_EN;
 	uBit.display.setDisplayMode(DISPLAY_MODE_BLACK_AND_WHITE);
 }
 
 void onButton(MicroBitEvent e) {
 	if (e.source == MICROBIT_ID_BUTTON_A)
-		uart_enabled ^= 1;
+		config ^= CF_UART_EN;
 
     if (e.source == MICROBIT_ID_BUTTON_B) {
-		if(greyscale)
+		if(config & CF_GREYSCALE_EN)
 			greyscale_disable();
 		else
 			greyscale_enable();
@@ -262,7 +265,7 @@ int main() {
 	rpi_counter = nv_rpi_counter;
 	*/
 	
-	if(greyscale)
+	if(config & CF_GREYSCALE_EN)
 		greyscale_enable();
 
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onButton);
