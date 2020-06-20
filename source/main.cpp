@@ -205,9 +205,8 @@ static void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi) {
 
 /* see https://os.mbed.com/docs/mbed-os/v5.15/mbed-os-api-doxy/struct_gap_1_1_advertisement_callback_params__t.html */
 void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
-    const uint8_t len = params->advertisingDataLen;
+    uint8_t len = params->advertisingDataLen;
 	const uint8_t *p = params->advertisingData;
-	const uint8_t *rpi_aem = p+8;
 	const uint8_t rssi = params->rssi; /* use for LED brightness */
 	
 	/* match Exposure Notification Service Class UUID 0xFD6F 
@@ -218,9 +217,15 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	 * 03 03 6ffd 
 	 * 17 16 6ffd 660a6af67f7e946b3c3ce253dae9b411 78b0e9c2 (rpi, aem)
 	 * */
-	if((len == 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd)) {
-		exposure_rx(rpi_aem, rssi);
+	
+	/* 02 01 1a only sent by iOS !??? */
+	if((len == 31) && (p[0] == 2) && (p[1] == 1) && (p[2] == 0x1a)) {
+		p+=3;
+		len-=3;
 	}
+	
+	if((len == 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd))
+		exposure_rx(p+8, rssi);
 }
 
 /* modes:
