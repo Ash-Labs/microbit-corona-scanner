@@ -53,14 +53,14 @@ static uint32_t rpis_seen 			= 0;
 #define MIN_BRIGHTNESS				16
 #define MAX_BRIGHTNESS				255
 
-#define RPI_AGE_TIMEOUT				(50*2)		/* 50 equals 1 second */
-static uint8_t rpi_age_fadeout 		= 5; 		//RPI_AGE_TIMEOUT;
+#define RPI_AGE_TIMEOUT				(50*2)				/* 50 equals 1 second */
+static uint8_t rpi_age_fadeout 		= RPI_AGE_TIMEOUT;
 
 /* config bits */
 #define CF_UART_EN					(1<<0)
-#define CF_GREYSCALE_EN				(1<<1)
+#define CF_RSSI_BRIGHTNESS			(1<<1)
 #define CF_FADEOUT_EN				(1<<2)
-static uint8_t config				= CF_GREYSCALE_EN;
+static uint8_t config				= 0;
 
 static uint8_t scale_rssi(uint8_t rssi) {
 	uint32_t res = MAX(rssi, MIN_RSSI);
@@ -74,14 +74,20 @@ static uint8_t scale_rssi(uint8_t rssi) {
 
 /* smoothly fade out aged RPIs :) */
 static uint8_t calc_brightness(const rpi_s *rpi) {
-	uint8_t rssi = rpi->rssi;
-	uint8_t age = rpi->age;
+	uint8_t val, age = rpi->age;
+	
 	if(age >= rpi_age_fadeout)
 		return 0;
-	else if(config & CF_GREYSCALE_EN)
-		return scale_rssi(rssi);
-	else
-		return 255;
+	
+	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(rpi->rssi) : 255;
+	
+	if(config & CF_FADEOUT_EN) {
+		uint32_t v32 = val;
+		v32 *= RPI_AGE_TIMEOUT-age;
+		v32 /= RPI_AGE_TIMEOUT;
+		val = v32;
+	}
+	return val;
 }
 
 static uint8_t refresh_screen(unsigned long now) {
@@ -213,26 +219,43 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	}
 }
 
-static void greyscale_enable(void) {
-	config |= CF_GREYSCALE_EN;
-	uBit.display.setDisplayMode(DISPLAY_MODE_GREYSCALE);
-}
-
-static void greyscale_disable(void) {
-	config &= ~CF_GREYSCALE_EN;
-	uBit.display.setDisplayMode(DISPLAY_MODE_BLACK_AND_WHITE);
+/* modes:
+ * 0: blink at full brightness
+ * 1: fade from RSSI				[DEFAULT]
+ * 2: blink with RSSI brightness
+ * 3: fade from full brightness
+ */
+static void mode_change(void) {
+	static uint8_t mode = 0;
+	
+	mode++;
+	mode&=3;
+	
+	/* all mode except blink at full brightness need greyscale enabled */
+	uBit.display.setDisplayMode(mode ? DISPLAY_MODE_GREYSCALE : DISPLAY_MODE_BLACK_AND_WHITE);
+	
+	/* RSSI brightness or full brightness? */
+	if((mode == 1) || (mode == 2))
+		config |= CF_RSSI_BRIGHTNESS;
+	else
+		config &= ~CF_RSSI_BRIGHTNESS;
+	
+	/* fadeout? */
+	if(mode&1)
+		config |= CF_FADEOUT_EN;
+	else
+		config &= ~CF_FADEOUT_EN;
+	
+	/* fadeout over 2 seconds vs. short blinks */
+	rpi_age_fadeout = (config & CF_FADEOUT_EN) ? RPI_AGE_TIMEOUT : 5;
 }
 
 void onButton(MicroBitEvent e) {
 	if (e.source == MICROBIT_ID_BUTTON_A)
 		config ^= CF_UART_EN;
 
-    if (e.source == MICROBIT_ID_BUTTON_B) {
-		if(config & CF_GREYSCALE_EN)
-			greyscale_disable();
-		else
-			greyscale_enable();
-	}
+    if (e.source == MICROBIT_ID_BUTTON_B)
+		mode_change();
 }
 
 static void randomize_age(void) {
@@ -250,26 +273,15 @@ static void randomize_age(void) {
 int main() {
 	uint32_t now = uBit.systemTime();
 	uint32_t last_cntprint = now;	
-	//uint32_t nv_rpi_counter = 0, last_nvwrite = now;
 
 	uBit.serial.setTxBufferSize(64);
 
 	rpi_list_init();
 	randomize_age();
-		
-	/* load non-volatile rpi counter (if available) */
-	/*
-	KeyValuePair* rpi_cnt_storage = uBit.storage.get("rpi_counter");
-	if(rpi_cnt_storage)
-		memcpy(&nv_rpi_counter, rpi_cnt_storage->value, sizeof(uint32_t));
-	rpi_counter = nv_rpi_counter;
-	*/
+	mode_change();
 	
-	if(config & CF_GREYSCALE_EN)
-		greyscale_enable();
-
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onButton);
-    uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_LONG_CLICK, onButton);
+    uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onButton);
 	
 	btle_set_gatt_table_size(BLE_GATTS_ATTR_TAB_SIZE_MIN);
 	
@@ -282,22 +294,10 @@ int main() {
     while (true) {
 		uint8_t rpis_active = 0;
 		
-        //uBit.ble->waitForEvent();
-		
 		uBit.sleep(20);
 		
 		now = uBit.systemTime();
 		rpis_active = refresh_screen(now);
-
-#if 0		
-		/* update non-volatile rpi counter at most once per second */
-		if((rpi_counter > nv_rpi_counter) && ((now - last_nvwrite) > 1000)) {
-			nv_rpi_counter = rpi_counter;
-			last_nvwrite = now;
-			// doesn't work yet?
-			//uBit.storage.put("rpi_counter", (uint8_t *)&nv_rpi_counter, sizeof(uint32_t));
-		}
-#endif
 		
 		/* output rpi counter every 10 seconds */
 		if((now - last_cntprint) >= 10000) {

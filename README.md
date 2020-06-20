@@ -7,9 +7,13 @@ Currently there's just blinking LEDs if Exposure Notification Beacons are receiv
 
 The number of RPIs seen is output every 10 seconds via the USB serial port.
 
-Press *A* for 3 seconds to see all received Exposure Notifications via the USB serial port (format is RPI, AEM, RSSI). Press again for 3 seconds to disable.
+Press *B* to change visualisation mode:
+ * 1: fade from RSSI				[DEFAULT]
+ * 2: blink with RSSI brightness
+ * 3: fade from full brightness
+ * 4: blink at full brightness
 
-Press *B* for 3 seconds to switch from RSSI-based LED brightness to full brightness (and back).
+Press *A* for 3 seconds to see all received Exposure Notifications via the USB serial port (format is RPI, AEM, RSSI). Press again for 3 seconds to disable.
 
 ## How to Build
 This project uses yotta to build, not pxt.
