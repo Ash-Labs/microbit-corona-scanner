@@ -45,9 +45,6 @@ void onButton(MicroBitEvent e) {
 	}
 }
 
-#define MAX(a,b)	((a)>=(b)?(a):(b))
-#define MIN(a,b)	((a)<=(b)?(a):(b))
-
 #define MIN_RSSI		158
 #define MIN_BRIGHTNESS	16
 #define MAX_BRIGHTNESS	255
@@ -86,6 +83,7 @@ static void rpi_list_init(void) {
 	for(i=0; i<RPI_N; i++,rpi++) {
 		rpi->older = (i-1)&0xff;
 		rpi->newer = i+1;
+		rpi->short_rpi = i;
 	}
 }
 
@@ -222,15 +220,28 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	}
 }
 
+static void randomize_age(void) {
+	uint32_t set=(1<<RPI_N)-1;
+	uBit.seedRandom();
+	while(set) {
+		uint32_t v = uBit.random(RPI_N);
+		if(set&(1<<v)) {
+			set &= ~(1<<v);
+			seen(v, 0);
+		}
+	}
+}
+
 int main() {
 	uint32_t now = uBit.systemTime();
-	uint32_t last_cntprint = now;
+	uint32_t last_cntprint = now;	
 	//uint32_t nv_rpi_counter = 0, last_nvwrite = now;
 
-	rpi_list_init();
-	
 	uBit.serial.setTxBufferSize(64);
-	
+
+	rpi_list_init();
+	randomize_age();
+		
 	/* load non-volatile rpi counter (if available) */
 	/*
 	KeyValuePair* rpi_cnt_storage = uBit.storage.get("rpi_counter");
