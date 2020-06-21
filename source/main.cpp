@@ -16,7 +16,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.4-rc1"
+#define VERSION_STRING	"v0.4"
 
 struct rpi_s {
 	uint16_t short_rpi;
@@ -328,23 +328,21 @@ static void mode_change(uint8_t inc) {
  * (long clicks are >= 2 seconds)
  * 
  * A during reset: sequential LED usage instead of randomized
-
+ * 
  * A short click : audio clicks on/off
- * A long click  : unused
+ * A long click  : enable RPI output via USB serial
  * 
  * B short click : change visualisation mode
  * B long click  : Apple/Google visualisation on/off
  * 
- * A+B long click: enable RPI output via USB serial
  */
-
 void onLongClick(MicroBitEvent e) {
-	if (e.source == MICROBIT_ID_BUTTON_B) {
+	if (e.source == MICROBIT_ID_BUTTON_A)
+		config ^= CF_UART_EN;
+	else if (e.source == MICROBIT_ID_BUTTON_B) {
 		config ^= CF_GOOPLE_VISUALIZE;
 		mode_change(0);
 	}
-	if (e.source == MICROBIT_ID_BUTTON_AB)
-		config ^= CF_UART_EN;
 }
 
 void onClick(MicroBitEvent e) {
@@ -354,8 +352,7 @@ void onClick(MicroBitEvent e) {
 		if(config & CF_CLICK_EN) /* click twice to signal clicks enabled */
 			click_request++;
 	}
-
-    if (e.source == MICROBIT_ID_BUTTON_B)
+    else if (e.source == MICROBIT_ID_BUTTON_B)
 		mode_change(1);
 }
 
@@ -372,17 +369,14 @@ static void randomize_age(void) {
 }
 
 /* TODO:
- * - test rc1 for v0.4
- * -> v0.4
  * 
- * future:
  * - audio: mute clicks from oldest RPI or RPI with highest seen counter instead of highest RSSI?
  * - visual: map age to LED position?
  * - visual: change RSSI -> brightness mapping?
  * - visual: stretch fadeout from RSSI to zero in RSSI-mode?
  * - visual: gamma correction?
  * 
-*/
+ */
 int main() {
 	uint32_t now = uBit.systemTime();
 	uint32_t last_cntprint = now;	
@@ -404,10 +398,8 @@ int main() {
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onClick);
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onClick);
     
-    // A long click is currently unused
-	// uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
+	uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
 	uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
-	uBit.messageBus.listen(MICROBIT_ID_BUTTON_AB, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
 	
 	btle_set_gatt_table_size(BLE_GATTS_ATTR_TAB_SIZE_MIN);
 	
