@@ -16,9 +16,7 @@ Press *B* to change visualisation mode:
  * 2: persistence at full brightness
  * 3: blink at full brightness
  
-Press *B* for 3 seconds to toggle Apple/Google visualisation.
-Blinking mode: short blinks are Google, longer Apple
-Persistence mode: Google blink 2x per second, Apple LEDs are always on
+Press *B* for 3 seconds to toggle Apple/Google visualisation. (Blinking mode: short blinks are Google, longer Apple. Persistence mode: Google blink 2x per second, Apple LEDs are always on.)
 
 Press *A* to toggle sound on/off. (Beacons from the device with the strongest signal do not trigger a click.)
 
