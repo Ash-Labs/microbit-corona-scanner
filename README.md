@@ -15,10 +15,12 @@ Press *B* to change visualisation mode:
  * 1: blink with RSSI brightness
  * 2: persistence at full brightness
  * 3: blink at full brightness
+ 
+Press *B* for 3 seconds to toggle Apple/Google visualisation.
 
-Press *A* to toggle sound on/off.
+Press *A* to toggle sound on/off. (Beacons from the device with the strongest signal do not trigger a click.)
 
-Press *A* for 3 seconds to see all received Exposure Notifications via the USB serial port (format is RPI, AEM, RSSI). Press again for 3 seconds to disable.
+Press *A+B* for 3 seconds to see all received Exposure Notifications via the USB serial port (format is RPI, AEM, RSSI). Press again for 3 seconds to disable.
 
 ## How to Build
 This project uses yotta to build, not pxt.
