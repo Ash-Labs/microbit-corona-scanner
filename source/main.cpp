@@ -330,7 +330,10 @@ int main() {
 	uBit.serial.setTxBufferSize(128);
 
 	rpi_list_init();
-	randomize_age();
+	
+	if(!uBit.buttonA.isPressed())
+		randomize_age();
+	
 	mode_change(0);
 	
 	/* display project identifier and version string both via LEDs and USB serial */
