@@ -5,6 +5,7 @@ v0.4 (WIP):
 - input: Button A during reset switches to sequential LED usage
 - audio: mute clicks from RPI with highest RSSI
 - serial: mark RPI with strongest RSSI
+- input: USB serial on/off moved to long click on A+B
 
 v0.3:
 - fix for Apple beacons

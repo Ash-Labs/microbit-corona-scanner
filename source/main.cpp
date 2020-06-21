@@ -277,7 +277,7 @@ static void audible_click(void) {
 	uBit.io.P0.setAnalogValue(0);
 }
 
-/* modes:
+/* visualisation modes:
  * 0: persistence with fadeout from RSSI				[DEFAULT]
  * 1: blink with RSSI brightness
  * 2: persistence at full brightness
@@ -309,13 +309,28 @@ static void mode_change(uint8_t inc) {
 	uBit.display.setDisplayMode(config&CF_RSSI_BRIGHTNESS ? DISPLAY_MODE_GREYSCALE : DISPLAY_MODE_BLACK_AND_WHITE);
 }
 
+/* button usage:
+ * 
+ * (long clicks are >= 2 seconds)
+ * 
+ * A during reset: sequential LED usage instead of randomized
+
+ * A short click : audio clicks on/off
+ * A long click  : unused
+ * 
+ * B short click : change visualisation mode
+ * B long click  : Apple/Google visualisation on/off
+ * 
+ * A+B long click: enable RPI output via USB serial
+ */
+
 void onLongClick(MicroBitEvent e) {
-	if (e.source == MICROBIT_ID_BUTTON_A)
-		config ^= CF_UART_EN;
 	if (e.source == MICROBIT_ID_BUTTON_B) {
 		config ^= CF_GOOPLE_VISUALIZE;
 		mode_change(0);
 	}
+	if (e.source == MICROBIT_ID_BUTTON_AB)
+		config ^= CF_UART_EN;
 }
 
 void onClick(MicroBitEvent e) {
@@ -343,7 +358,6 @@ static void randomize_age(void) {
 }
 
 /* TODO:
- * - input: button remap and documentation
  * - visual: Apple/Google visualisation
  * -> v0.4
  * 
@@ -375,8 +389,11 @@ int main() {
 
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onClick);
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onClick);
-	uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
+    
+    // A long click is currently unused
+	// uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
 	uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
+	uBit.messageBus.listen(MICROBIT_ID_BUTTON_AB, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
 	
 	btle_set_gatt_table_size(BLE_GATTS_ATTR_TAB_SIZE_MIN);
 	
