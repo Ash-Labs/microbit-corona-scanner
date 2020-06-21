@@ -52,9 +52,10 @@ static void rpi_list_init(void) {
 
 MicroBit uBit;
 
-static uint8_t rx_activity			= 0;
 static uint32_t google_rpis_seen	= 0;
 static uint32_t apple_rpis_seen		= 0;
+static uint8_t click_request		= 0;
+static uint8_t muted_rpi			= 255;
 
 #define MIN_RSSI					158
 #define MIN_BRIGHTNESS				16
@@ -107,22 +108,41 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active, uin
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
 	uint8_t apple_rpis = 0, google_rpis = 0, flags;
+	uint8_t rssi, best_rssi = 0, best_rpi = 255;
 
 	for(x=0;x<5;x++) {
 		for(y=0;y<5;y++,rpi++) {
+			
+			/* ignore dead RPIs */
 			if(rpi->age > RPI_AGE_TIMEOUT)
 				continue;
+			
+			/* update active RPIs counter */
 			flags = HAS_FLAGS(rpi->flags_rssi);
 			apple_rpis += flags;
 			google_rpis += (flags^1);
+			
 			rpi->age++;
+			
 			uBit.display.image.setPixelValue(x,y,calc_brightness(rpi));
+			
+			/* find RPI with highest RSSI */
+			rssi = GET_RSSI(rpi->flags_rssi);
+			if(rssi>best_rssi) {
+				best_rssi = rssi;
+				best_rpi = rpi - rpi_list;
+			}
 		}
 	}
+	
+	muted_rpi = best_rpi;
+	
 	if(apple_rpis_active)
 		*apple_rpis_active = apple_rpis;
+	
 	if(google_rpis_active)
 		*google_rpis_active = google_rpis;
+	
 	return apple_rpis + google_rpis;
 }
 
@@ -174,6 +194,8 @@ static void seen(uint16_t short_rpi, uint8_t rssi, uint8_t flags_present) {
 	x = idx/5;
 	y = idx%5;
 	uBit.display.image.setPixelValue(x,y,calc_brightness(rpi));
+	
+	click_request += (idx != muted_rpi);
 }
 
 static uint8_t nibble2hex(uint8_t n) {
@@ -220,8 +242,6 @@ static void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi, uint8_t flags_pres
 	
 	if(config & CF_UART_EN)
 		exposure_to_uart(rpi_aem, rssi, now, flags_present);
-
-	rx_activity++;
 }
 
 /* see https://os.mbed.com/docs/mbed-os/v5.15/mbed-os-api-doxy/struct_gap_1_1_advertisement_callback_params__t.html */
@@ -249,6 +269,12 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	
 	if((len == 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd))
 		exposure_rx(p+8, rssi, flags_present);
+}
+
+static void audible_click(void) {
+	uBit.io.P0.setAnalogValue(512);
+	uBit.sleep(1);
+	uBit.io.P0.setAnalogValue(0);
 }
 
 /* modes:
@@ -293,8 +319,12 @@ void onLongClick(MicroBitEvent e) {
 }
 
 void onClick(MicroBitEvent e) {
-	if (e.source == MICROBIT_ID_BUTTON_A)
+	if (e.source == MICROBIT_ID_BUTTON_A) {
 		config ^= CF_CLICK_EN;
+		audible_click();
+		if(config & CF_CLICK_EN) /* click twice to signal clicks enabled */
+			click_request++;
+	}
 
     if (e.source == MICROBIT_ID_BUTTON_B)
 		mode_change(1);
@@ -312,20 +342,26 @@ static void randomize_age(void) {
 	}
 }
 
-/* TODO list:
- * v0.4:
- * - visual: Apple/Google visualisation
- * - audio: suppress clicks from own device (seen counter, oldest RPI or highest RSSI?)
+/* CHANGELOG:
+ * v0.4 (WIP):
+ * - audio: mute clicks from RPI with highest RSSI
  * 
- * - map age to LED position?
- * - change RSSI -> brightness mapping?
- * - stretch fadeout from RSSI to zero in RSSI-mode?
- * - gamma correction?
+ * TODO (next version):
+ * - input: button remap and documentation
+ * - visual: Apple/Google visualisation
+ * 
+ * future:
+ * - audio: mute clicks from oldest RPI or RPI with highest seen counter instead of highest RSSI?
+ * - visual: map age to LED position?
+ * - visual: change RSSI -> brightness mapping?
+ * - visual: stretch fadeout from RSSI to zero in RSSI-mode?
+ * - visual: gamma correction?
+ * 
 */
 int main() {
 	uint32_t now = uBit.systemTime();
 	uint32_t last_cntprint = now;	
-	uint8_t rxact_last = 0, sleep_time = 20;
+	uint8_t clicks_done = 0, sleep_time = 20;
 
 	uBit.serial.setTxBufferSize(128);
 
@@ -355,6 +391,9 @@ int main() {
 
 	uBit.io.P0.setAnalogValue(0);
 	uBit.io.P0.setAnalogPeriodUs(1000000/1000);
+	
+	/* do a dummy click */	
+	click_request++;
 
     while (true) {
 		uint8_t apple_rpis_active = 0, google_rpis_active = 0;
@@ -375,12 +414,10 @@ int main() {
 		}
 		
 		sleep_time = 20;
-		if(rxact_last != rx_activity) {
-			rxact_last = rx_activity;
+		if(clicks_done != click_request) {
+			clicks_done = click_request;
 			if(config & CF_CLICK_EN) {
-				uBit.io.P0.setAnalogValue(512);
-				uBit.sleep(1);
-				uBit.io.P0.setAnalogValue(0);
+				audible_click();
 				sleep_time = 19;
 			}
 		}
