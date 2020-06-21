@@ -55,7 +55,7 @@ MicroBit uBit;
 static uint32_t google_rpis_seen	= 0;
 static uint32_t apple_rpis_seen		= 0;
 static uint8_t click_request		= 0;
-static uint8_t muted_rpi			= 255;
+static uint8_t strongest_rpi			= 255;
 
 #define MIN_RSSI					158
 #define MIN_BRIGHTNESS				16
@@ -108,7 +108,7 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active, uin
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
 	uint8_t apple_rpis = 0, google_rpis = 0, flags;
-	uint8_t rssi, best_rssi = 0, best_rpi = 255;
+	uint8_t rssi, best_rssi = 0, _strongest_rpi = 255;
 
 	for(x=0;x<5;x++) {
 		for(y=0;y<5;y++,rpi++) {
@@ -130,12 +130,12 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active, uin
 			rssi = GET_RSSI(rpi->flags_rssi);
 			if(rssi>best_rssi) {
 				best_rssi = rssi;
-				best_rpi = rpi - rpi_list;
+				_strongest_rpi = rpi - rpi_list;
 			}
 		}
 	}
 	
-	muted_rpi = best_rpi;
+	strongest_rpi = _strongest_rpi;
 	
 	if(apple_rpis_active)
 		*apple_rpis_active = apple_rpis;
@@ -146,7 +146,7 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active, uin
 	return apple_rpis + google_rpis;
 }
 
-static void seen(uint16_t short_rpi, uint8_t rssi, uint8_t flags_present) {
+static uint8_t seen(uint16_t short_rpi, uint8_t rssi, uint8_t flags_present) {
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
 	int idx;
@@ -183,7 +183,7 @@ static void seen(uint16_t short_rpi, uint8_t rssi, uint8_t flags_present) {
 
 	if(!rssi) {
 		rpi->flags_rssi = 0;
-		return;
+		return 0;
 	}
 	
 	rssi = (rssi > 128) ? (rssi-128) : 1;
@@ -195,7 +195,7 @@ static void seen(uint16_t short_rpi, uint8_t rssi, uint8_t flags_present) {
 	y = idx%5;
 	uBit.display.image.setPixelValue(x,y,calc_brightness(rpi));
 	
-	click_request += (idx != muted_rpi);
+	return idx == strongest_rpi;
 }
 
 static uint8_t nibble2hex(uint8_t n) {
@@ -212,14 +212,14 @@ static char *tohex(char *dst, const uint8_t *src, uint32_t n) {
 	return dst;
 }
 
-static void exposure_to_uart(const uint8_t *rpi_aem, uint8_t rssi, unsigned long now, uint8_t flags_present) {
+static void exposure_to_uart(const uint8_t *rpi_aem, uint8_t rssi, uint8_t flags_present, uint8_t is_strongest) {
 	char buf[64];
 	char *p = buf;
 	p=tohex(p, rpi_aem, 16);
 	*p=' ';
 	p=tohex(p+1, rpi_aem+16, 4);
 	*p=' ';
-	sprintf(p+1,"%c%c %03d\r\n",flags_present ? 'A' : 'G',' ',rssi); /* unused flag: RFU: indicator for RPI w/ highest RSSI */
+	sprintf(p+1,"%c%c %03d\r\n",flags_present ? 'A' : 'G',is_strongest ? '!' : ' ',rssi); /* unused flag: RFU: indicator for RPI w/ highest RSSI */
 	uBit.serial.send(buf, ASYNC);
 }
 
@@ -236,12 +236,12 @@ static void exposure_to_uart(const uint8_t *rpi_aem, uint8_t rssi, unsigned long
  */
 static void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi, uint8_t flags_present) {
 	uint16_t short_rpi = (rpi_aem[0]<<8)|rpi_aem[1];
-	unsigned long now = uBit.systemTime();
+	uint8_t is_strongest = seen(short_rpi, rssi, flags_present);
 	
-	seen(short_rpi, rssi, flags_present);
+	click_request += (is_strongest ^ 1);
 	
 	if(config & CF_UART_EN)
-		exposure_to_uart(rpi_aem, rssi, now, flags_present);
+		exposure_to_uart(rpi_aem, rssi, flags_present, is_strongest);
 }
 
 /* see https://os.mbed.com/docs/mbed-os/v5.15/mbed-os-api-doxy/struct_gap_1_1_advertisement_callback_params__t.html */

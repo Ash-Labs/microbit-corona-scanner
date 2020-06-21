@@ -1,9 +1,11 @@
 
 v0.4 (WIP):
-- show project name and version on LEDs and USB serial during start
-- buttons: Button A during reset switches to sequential LED usage
+- serial: show number of Apple and Google RPIs
+- general: show project name and version on LEDs and USB serial during start
+- input: Button A during reset switches to sequential LED usage
 - audio: mute clicks from RPI with highest RSSI
+- serial: mark RPI with strongest RSSI
 
 v0.3:
-- fix for iOS beacons
+- fix for Apple beacons
 - audio: clicks upon beacon reception - can be en-/disabled with button A
