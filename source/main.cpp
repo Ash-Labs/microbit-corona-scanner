@@ -16,6 +16,8 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
+#define VERSION_STRING	"v0.4-dev"
+
 struct rpi_s {
 	uint16_t short_rpi;
 	uint8_t flags_rssi;				/* flags present: 0x80, RSSI mask: 0x7f */
@@ -312,12 +314,16 @@ int main() {
 	uint32_t last_cntprint = now;	
 	uint8_t rxact_last = 0, sleep_time = 20;
 
-	uBit.serial.setTxBufferSize(255);
+	uBit.serial.setTxBufferSize(128);
 
 	rpi_list_init();
 	randomize_age();
 	mode_change();
 	
+	/* display project identifier and version string both via LEDs and USB serial */
+	uBit.display.scroll("cs-" VERSION_STRING, MICROBIT_DEFAULT_SCROLL_SPEED/2);
+	uBit.serial.send("corona-scanner " VERSION_STRING "\r\n", SYNC_SPINWAIT);
+
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onClick);
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onClick);
 	uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
