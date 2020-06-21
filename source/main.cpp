@@ -61,13 +61,15 @@ static uint32_t apple_rpis_seen		= 0;
 #define MAX_BRIGHTNESS				255
 
 #define RPI_AGE_TIMEOUT				(50*2)				/* 50 equals 1 second */
-static uint8_t rpi_age_fadeout 		= RPI_AGE_TIMEOUT;
+static uint8_t apple_age_fadeout 	= RPI_AGE_TIMEOUT;
+static uint8_t google_age_fadeout	= RPI_AGE_TIMEOUT;
 
 /* config bits */
-#define CF_UART_EN					(1<<0)
-#define CF_RSSI_BRIGHTNESS			(1<<1)
-#define CF_FADEOUT_EN				(1<<2)
-#define CF_CLICK_EN					(1<<3)
+#define CF_UART_EN					(1<<0)	/* enable USB serial RPI output */
+#define CF_RSSI_BRIGHTNESS			(1<<1)	/* use RSSI for LED brightness 	*/
+#define CF_FADEOUT_EN				(1<<2)	/* fadeout LEDs over time 		*/
+#define CF_CLICK_EN					(1<<3)	/* Audio clicks enable 			*/
+#define CF_GOOPLE_VISUALIZE			(1<<4)	/* Apple/Google visualisation 	*/
 static uint8_t config				= 0;
 
 static uint8_t scale_rssi(uint8_t rssi) {
@@ -83,11 +85,14 @@ static uint8_t scale_rssi(uint8_t rssi) {
 /* smoothly fade out aged RPIs :) */
 static uint8_t calc_brightness(const rpi_s *rpi) {
 	uint8_t val, age = rpi->age;
+	uint8_t age_fadeout = HAS_FLAGS(rpi->flags_rssi) ? apple_age_fadeout : google_age_fadeout;
 	
-	if(age >= rpi_age_fadeout)
+	if(age >= age_fadeout)
 		return 0;
 	
 	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(GET_RSSI(rpi->flags_rssi)) : 255;
+	
+	/* TODO: add on/off modulation for Apple/Google distinction? */
 	
 	if(config & CF_FADEOUT_EN) {
 		uint32_t v32 = val;
@@ -252,10 +257,10 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
  * 2: persistence at full brightness
  * 3: blink at full brightness
  */
-static void mode_change(void) {
-	static uint8_t mode = 3;
+static void mode_change(uint8_t inc) {
+	static uint8_t mode = 0;
 	
-	mode++;
+	mode+=inc;
 	mode&=3;
 
 	/* fadeout? */
@@ -265,7 +270,9 @@ static void mode_change(void) {
 		config &= ~CF_FADEOUT_EN;
 	
 	/* short blinks vs. inactive after 2 seconds */
-	rpi_age_fadeout = (mode&1) ? 5 : RPI_AGE_TIMEOUT;
+	apple_age_fadeout = google_age_fadeout = (mode&1) ? 5  : RPI_AGE_TIMEOUT;
+	if(config & CF_GOOPLE_VISUALIZE)
+		google_age_fadeout = (mode&1) ? 2 : RPI_AGE_TIMEOUT; /* make Google blinks shorter */
 	
 	/* RSSI brightness or full brightness? */
 	if (mode&2)
@@ -279,6 +286,10 @@ static void mode_change(void) {
 void onLongClick(MicroBitEvent e) {
 	if (e.source == MICROBIT_ID_BUTTON_A)
 		config ^= CF_UART_EN;
+	if (e.source == MICROBIT_ID_BUTTON_B) {
+		config ^= CF_GOOPLE_VISUALIZE;
+		mode_change(0);
+	}
 }
 
 void onClick(MicroBitEvent e) {
@@ -286,7 +297,7 @@ void onClick(MicroBitEvent e) {
 		config ^= CF_CLICK_EN;
 
     if (e.source == MICROBIT_ID_BUTTON_B)
-		mode_change();
+		mode_change(1);
 }
 
 static void randomize_age(void) {
@@ -302,13 +313,15 @@ static void randomize_age(void) {
 }
 
 /* TODO list:
+ * v0.4:
+ * - visual: Apple/Google visualisation
+ * - audio: suppress clicks from own device (oldest RPI or highest RSSI?)
+ * 
+ * - map age to LED position?
  * - change RSSI -> brightness mapping?
  * - stretch fadeout from RSSI to zero in RSSI-mode?
  * - gamma correction?
- * - add audio output?
- * - make number of active RPIs accessible via BLE?
 */
-
 int main() {
 	uint32_t now = uBit.systemTime();
 	uint32_t last_cntprint = now;	
@@ -318,7 +331,7 @@ int main() {
 
 	rpi_list_init();
 	randomize_age();
-	mode_change();
+	mode_change(0);
 	
 	/* display project identifier and version string both via LEDs and USB serial */
 	uBit.display.scroll("cs-" VERSION_STRING, MICROBIT_DEFAULT_SCROLL_SPEED/2);
@@ -327,6 +340,7 @@ int main() {
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onClick);
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onClick);
 	uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
+	uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
 	
 	btle_set_gatt_table_size(BLE_GATTS_ATTR_TAB_SIZE_MIN);
 	
