@@ -16,7 +16,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.4-dev"
+#define VERSION_STRING	"v0.4-rc1"
 
 struct rpi_s {
 	uint16_t short_rpi;
@@ -68,9 +68,10 @@ static uint8_t google_age_fadeout	= RPI_AGE_TIMEOUT;
 /* config bits */
 #define CF_UART_EN					(1<<0)	/* enable USB serial RPI output */
 #define CF_RSSI_BRIGHTNESS			(1<<1)	/* use RSSI for LED brightness 	*/
-#define CF_FADEOUT_EN				(1<<2)	/* fadeout LEDs over time 		*/
-#define CF_CLICK_EN					(1<<3)	/* Audio clicks enable 			*/
+#define CF_PERSISTENCE_EN			(1<<2)	/* persistence visualisation 	*/
+#define CF_FADEOUT_EN				(1<<3)	/* fadeout LEDs over time 		*/
 #define CF_GOOPLE_VISUALIZE			(1<<4)	/* Apple/Google visualisation 	*/
+#define CF_CLICK_EN					(1<<5)	/* Audio clicks enable 			*/
 static uint8_t config				= 0;
 
 static uint8_t scale_rssi(uint8_t rssi) {
@@ -84,7 +85,7 @@ static uint8_t scale_rssi(uint8_t rssi) {
 }
 
 /* smoothly fade out aged RPIs :) */
-static uint8_t calc_brightness(const rpi_s *rpi) {
+static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 	uint8_t val, age = rpi->age;
 	uint8_t age_fadeout = HAS_FLAGS(rpi->flags_rssi) ? apple_age_fadeout : google_age_fadeout;
 	
@@ -93,7 +94,12 @@ static uint8_t calc_brightness(const rpi_s *rpi) {
 	
 	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(GET_RSSI(rpi->flags_rssi)) : 255;
 	
-	/* TODO: add on/off modulation for Apple/Google distinction? */
+	/* add 2Hz on/off blinking for Google if persistence mode and Apple/Google visualisation enabled */
+	if((config & CF_PERSISTENCE_EN) && (config & CF_GOOPLE_VISUALIZE) && (!HAS_FLAGS(rpi->flags_rssi))) {
+		uint32_t fraction = now&511;
+		if(fraction > 255)
+			return 0;
+	}
 	
 	if(config & CF_FADEOUT_EN) {
 		uint32_t v32 = val;
@@ -124,7 +130,7 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active, uin
 			
 			rpi->age++;
 			
-			uBit.display.image.setPixelValue(x,y,calc_brightness(rpi));
+			uBit.display.image.setPixelValue(x,y,calc_brightness(rpi, now));
 			
 			/* find RPI with highest RSSI */
 			rssi = GET_RSSI(rpi->flags_rssi);
@@ -193,7 +199,7 @@ static uint8_t seen(uint16_t short_rpi, uint8_t rssi, uint8_t flags_present) {
 	
 	x = idx/5;
 	y = idx%5;
-	uBit.display.image.setPixelValue(x,y,calc_brightness(rpi));
+	uBit.display.image.setPixelValue(x,y,calc_brightness(rpi, uBit.systemTime()));
 	
 	return idx == strongest_rpi;
 }
@@ -300,6 +306,12 @@ static void mode_change(uint8_t inc) {
 	if(config & CF_GOOPLE_VISUALIZE)
 		google_age_fadeout = (mode&1) ? 2 : RPI_AGE_TIMEOUT; /* make Google blinks shorter */
 	
+	/* persistence flag */
+	if (mode&1)
+		config &= ~CF_PERSISTENCE_EN;
+	else
+		config |= CF_PERSISTENCE_EN;
+	
 	/* RSSI brightness or full brightness? */
 	if (mode&2)
 		config &= ~CF_RSSI_BRIGHTNESS;
@@ -358,7 +370,7 @@ static void randomize_age(void) {
 }
 
 /* TODO:
- * - visual: Apple/Google visualisation
+ * - test rc1 for v0.4
  * -> v0.4
  * 
  * future:
