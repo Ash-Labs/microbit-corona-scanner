@@ -18,13 +18,16 @@ uint32_t btle_set_gatt_table_size(uint32_t size);
 
 struct rpi_s {
 	uint16_t short_rpi;
-	uint8_t rssi;
+	uint8_t flags_rssi;				/* flags present: 0x80, RSSI mask: 0x7f */
 	uint8_t age;
 	
 	/* tiny age-sorted linked list w/o pointers to save precious RAM */
 	uint8_t older;
 	uint8_t newer;
 };
+
+#define HAS_FLAGS(a) 				((a)>>7)
+#define GET_RSSI(a)					(((a)&0x7f)+128)
 
 #define RPI_N 						25
 
@@ -48,7 +51,8 @@ static void rpi_list_init(void) {
 MicroBit uBit;
 
 static uint8_t rx_activity			= 0;
-static uint32_t rpis_seen 			= 0;
+static uint32_t google_rpis_seen	= 0;
+static uint32_t apple_rpis_seen		= 0;
 
 #define MIN_RSSI					158
 #define MIN_BRIGHTNESS				16
@@ -81,7 +85,7 @@ static uint8_t calc_brightness(const rpi_s *rpi) {
 	if(age >= rpi_age_fadeout)
 		return 0;
 	
-	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(rpi->rssi) : 255;
+	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(GET_RSSI(rpi->flags_rssi)) : 255;
 	
 	if(config & CF_FADEOUT_EN) {
 		uint32_t v32 = val;
@@ -92,24 +96,30 @@ static uint8_t calc_brightness(const rpi_s *rpi) {
 	return val;
 }
 
-static uint8_t refresh_screen(unsigned long now) {
+static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active, uint8_t *google_rpis_active) {
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
-	uint8_t rpis_active = 0;
+	uint8_t apple_rpis = 0, google_rpis = 0, flags;
 
 	for(x=0;x<5;x++) {
 		for(y=0;y<5;y++,rpi++) {
 			if(rpi->age > RPI_AGE_TIMEOUT)
 				continue;
-			rpis_active++;
+			flags = HAS_FLAGS(rpi->flags_rssi);
+			apple_rpis += flags;
+			google_rpis += (flags^1);
 			rpi->age++;
 			uBit.display.image.setPixelValue(x,y,calc_brightness(rpi));
 		}
 	}
-	return rpis_active;
+	if(apple_rpis_active)
+		*apple_rpis_active = apple_rpis;
+	if(google_rpis_active)
+		*google_rpis_active = google_rpis;
+	return apple_rpis + google_rpis;
 }
 
-static void seen(uint16_t short_rpi, uint8_t rssi) {
+static void seen(uint16_t short_rpi, uint8_t rssi, uint8_t flags_present) {
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
 	int idx;
@@ -119,7 +129,8 @@ static void seen(uint16_t short_rpi, uint8_t rssi) {
 	
 	/* allocate rpi if not seen yet */
 	if(idx == RPI_N) {
-		rpis_seen++;
+		apple_rpis_seen += flags_present;
+		google_rpis_seen += (flags_present^1);
 		/* reuse oldest rpi slot */
 		idx = oldest_rpi;
 		rpi = rpi_list + idx;
@@ -142,11 +153,15 @@ static void seen(uint16_t short_rpi, uint8_t rssi) {
 		rpi->older = newest_rpi;
 		newest_rpi = idx;
 	}
-	
-	rpi->rssi = rssi;
-	if(!rssi)
+
+	if(!rssi) {
+		rpi->flags_rssi = 0;
 		return;
-		
+	}
+	
+	rssi = (rssi > 128) ? (rssi-128) : 1;
+	rpi->flags_rssi = (flags_present<<7)|rssi;
+	
 	rpi->age = 0;
 	
 	x = idx/5;
@@ -168,15 +183,14 @@ static char *tohex(char *dst, const uint8_t *src, uint32_t n) {
 	return dst;
 }
 
-static void exposure_to_uart(const uint8_t *rpi_aem, uint8_t rssi, unsigned long now) {
+static void exposure_to_uart(const uint8_t *rpi_aem, uint8_t rssi, unsigned long now, uint8_t flags_present) {
 	char buf[64];
 	char *p = buf;
-	//p+=sprintf(buf, "[%10ld] ",now);
 	p=tohex(p, rpi_aem, 16);
 	*p=' ';
 	p=tohex(p+1, rpi_aem+16, 4);
 	*p=' ';
-	sprintf(p+1,"%03d\r\n",rssi);
+	sprintf(p+1,"%c%c %03d\r\n",flags_present ? 'A' : 'G',' ',rssi); /* unused flag: RFU: indicator for RPI w/ highest RSSI */
 	uBit.serial.send(buf, ASYNC);
 }
 
@@ -191,14 +205,14 @@ static void exposure_to_uart(const uint8_t *rpi_aem, uint8_t rssi, unsigned long
  * ~5m  distance + wall: 158
  * ~8m distance + 2x wall: 158
  */
-static void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi) {
+static void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi, uint8_t flags_present) {
 	uint16_t short_rpi = (rpi_aem[0]<<8)|rpi_aem[1];
 	unsigned long now = uBit.systemTime();
 	
-	seen(short_rpi, rssi);
+	seen(short_rpi, rssi, flags_present);
 	
 	if(config & CF_UART_EN)
-		exposure_to_uart(rpi_aem, rssi, now);
+		exposure_to_uart(rpi_aem, rssi, now, flags_present);
 
 	rx_activity++;
 }
@@ -208,6 +222,7 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
     uint8_t len = params->advertisingDataLen;
 	const uint8_t *p = params->advertisingData;
 	const uint8_t rssi = params->rssi; /* use for LED brightness */
+	uint8_t flags_present = 0;
 	
 	/* match Exposure Notification Service Class UUID 0xFD6F 
 	 * 
@@ -222,10 +237,11 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	if((len == 31) && (p[0] == 2) && (p[1] == 1) && (p[2] == 0x1a)) {
 		p+=3;
 		len-=3;
+		flags_present = 1;
 	}
 	
 	if((len == 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd))
-		exposure_rx(p+8, rssi);
+		exposure_rx(p+8, rssi, flags_present);
 }
 
 /* modes:
@@ -278,7 +294,7 @@ static void randomize_age(void) {
 		uint32_t v = uBit.random(RPI_N);
 		if(set&(1<<v)) {
 			set &= ~(1<<v);
-			seen(v, 0);
+			seen(v, 0, 0);
 		}
 	}
 }
@@ -296,7 +312,7 @@ int main() {
 	uint32_t last_cntprint = now;	
 	uint8_t rxact_last = 0, sleep_time = 20;
 
-	uBit.serial.setTxBufferSize(64);
+	uBit.serial.setTxBufferSize(255);
 
 	rpi_list_init();
 	randomize_age();
@@ -318,18 +334,20 @@ int main() {
 	uBit.io.P0.setAnalogPeriodUs(1000000/1000);
 
     while (true) {
-		uint8_t rpis_active = 0;
+		uint8_t apple_rpis_active = 0, google_rpis_active = 0;
 		
 		uBit.sleep(sleep_time);
 				
 		now = uBit.systemTime();
-		rpis_active = refresh_screen(now);
+		refresh_screen(now, &apple_rpis_active, &google_rpis_active);
 		
 		/* output rpi counter every 10 seconds */
 		if((now - last_cntprint) >= 10000) {
-			char buf[48];
+			char buf[128];
 			last_cntprint = now;
-			sprintf(buf,"RPIs active: %2d seen: %ld\r\n",rpis_active, (unsigned long)rpis_seen);
+			sprintf(buf,"RPIs active: %2d (Apple: %2d, Google: %2d) seen: %ld (Apple: %ld, Google: %ld)\r\n",
+				apple_rpis_active + google_rpis_active, apple_rpis_active, google_rpis_active,
+				apple_rpis_seen + google_rpis_seen, apple_rpis_seen, google_rpis_seen);
 			uBit.serial.send(buf, ASYNC);
 		}
 		
