@@ -315,7 +315,7 @@ static void randomize_age(void) {
 /* TODO list:
  * v0.4:
  * - visual: Apple/Google visualisation
- * - audio: suppress clicks from own device (oldest RPI or highest RSSI?)
+ * - audio: suppress clicks from own device (seen counter, oldest RPI or highest RSSI?)
  * 
  * - map age to LED position?
  * - change RSSI -> brightness mapping?
