@@ -88,7 +88,7 @@ static uint8_t scale_rssi(uint8_t rssi) {
 static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 	uint8_t val, age = rpi->age;
 	uint8_t age_fadeout = HAS_FLAGS(rpi->flags_rssi) ? apple_age_fadeout : google_age_fadeout;
-	
+		
 	if(age >= age_fadeout)
 		return 0;
 	
@@ -303,8 +303,10 @@ static void mode_change(uint8_t inc) {
 	
 	/* short blinks vs. inactive after 2 seconds */
 	apple_age_fadeout = google_age_fadeout = (mode&1) ? 5  : RPI_AGE_TIMEOUT;
-	if(config & CF_GOOPLE_VISUALIZE)
+	if(config & CF_GOOPLE_VISUALIZE) {
 		google_age_fadeout = (mode&1) ? 2 : RPI_AGE_TIMEOUT; /* make Google blinks shorter */
+		apple_age_fadeout = (mode&1) ? 7 : RPI_AGE_TIMEOUT; /* make Apple blinks longer */
+	}
 	
 	/* persistence flag */
 	if (mode&1)
