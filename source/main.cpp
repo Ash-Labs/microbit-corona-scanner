@@ -342,13 +342,10 @@ static void randomize_age(void) {
 	}
 }
 
-/* CHANGELOG:
- * v0.4 (WIP):
- * - audio: mute clicks from RPI with highest RSSI
- * 
- * TODO (next version):
+/* TODO:
  * - input: button remap and documentation
  * - visual: Apple/Google visualisation
+ * -> v0.4
  * 
  * future:
  * - audio: mute clicks from oldest RPI or RPI with highest seen counter instead of highest RSSI?

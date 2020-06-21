@@ -1,0 +1,9 @@
+
+v0.4 (WIP):
+- show project name and version on LEDs and USB serial during start
+- buttons: Button A during reset switches to sequential LED usage
+- audio: mute clicks from RPI with highest RSSI
+
+v0.3:
+- fix for iOS beacons
+- audio: clicks upon beacon reception - can be en-/disabled with button A
