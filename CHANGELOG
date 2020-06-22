@@ -1,3 +1,5 @@
+v0.4.1:
+- serial: prevent garbled lines (check serial buffer space before printing)
 
 v0.4:
 - serial: show number of Apple and Google RPIs

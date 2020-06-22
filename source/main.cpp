@@ -16,7 +16,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.4"
+#define VERSION_STRING	"v0.4.1-dev1"
 
 struct rpi_s {
 	uint16_t short_rpi;
@@ -246,7 +246,7 @@ static void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi, uint8_t flags_pres
 	
 	click_request += (is_strongest ^ 1);
 	
-	if(config & CF_UART_EN)
+	if((config & CF_UART_EN) && (uBit.serial.txBufferedSize() <= 64)) /* prevent garbled lines */
 		exposure_to_uart(rpi_aem, rssi, flags_present, is_strongest);
 }
 
@@ -425,7 +425,7 @@ int main() {
 		refresh_screen(now, &apple_rpis_active, &google_rpis_active);
 		
 		/* output rpi counter every 10 seconds */
-		if((now - last_cntprint) >= 10000) {
+		if(((now - last_cntprint) >= 10000) && (uBit.serial.txBufferedSize() <= 16)) {
 			char buf[128];
 			last_cntprint = now;
 			sprintf(buf,"RPIs active: %2d (Apple: %2d, Google: %2d) seen: %ld (Apple: %ld, Google: %ld)\r\n",
