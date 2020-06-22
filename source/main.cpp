@@ -370,6 +370,7 @@ static void randomize_age(void) {
 
 /* TODO:
  * 
+ * - serial: support serial commands? (e.g. RPI-to-UART en/disable?)
  * - audio: mute clicks from oldest RPI or RPI with highest seen counter instead of highest RSSI?
  * - visual: map age to LED position?
  * - visual: change RSSI -> brightness mapping?
