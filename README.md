@@ -44,7 +44,7 @@ cp build/bbc-microbit-classic-gcc-s130/source/corona-scanner-combined.hex /Volum
 ```
 
 ## Building on Windows
-get https://launchpad.net/gcc-arm-embedded/+download for arm gcc
-get https://github.com/ninja-build/ninja for building with cmake
-get https://sourceforge.net/projects/srecord/ for linking 
+get https://launchpad.net/gcc-arm-embedded/+download for arm gcc  
+get https://github.com/ninja-build/ninja for building with cmake  
+get https://sourceforge.net/projects/srecord/ for linking   
 
