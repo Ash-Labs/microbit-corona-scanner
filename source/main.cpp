@@ -16,7 +16,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.4.1-dev1"
+#define VERSION_STRING	"v0.4.1-dev2"
 
 struct rpi_s {
 	uint16_t short_rpi;
@@ -29,7 +29,7 @@ struct rpi_s {
 };
 
 #define HAS_FLAGS(a) 				((a)>>7)
-#define GET_RSSI(a)					(((a)&0x7f)+128)
+#define GET_RSSI(a)					(((a)&0x7f)|0x80)
 
 #define RPI_N 						25
 
@@ -43,10 +43,10 @@ static void rpi_list_init(void) {
 	
 	/* initialize linked list for aging */
 	for(i=0; i<RPI_N; i++,rpi++) {
-		rpi->older = (i-1)&0xff;
+		rpi->older = (i-1)&UINT8_MAX;
 		rpi->newer = i+1;
 		rpi->short_rpi = i;
-		rpi->age = 255;
+		rpi->age = UINT8_MAX;
 	}
 }
 
@@ -55,11 +55,12 @@ MicroBit uBit;
 static uint32_t google_rpis_seen	= 0;
 static uint32_t apple_rpis_seen		= 0;
 static uint8_t click_request		= 0;
-static uint8_t strongest_rpi			= 255;
+static uint8_t strongest_rpi			= UINT8_MAX;
 
-#define MIN_RSSI					158
+#define MIN_RSSI					(-98)
+#define MAX_RSSI					(-56)
 #define MIN_BRIGHTNESS				16
-#define MAX_BRIGHTNESS				255
+#define MAX_BRIGHTNESS				UINT8_MAX
 
 #define RPI_AGE_TIMEOUT				(50*2)				/* 50 equals 1 second */
 static uint8_t apple_age_fadeout 	= RPI_AGE_TIMEOUT;
@@ -74,14 +75,14 @@ static uint8_t google_age_fadeout	= RPI_AGE_TIMEOUT;
 #define CF_CLICK_EN					(1<<5)	/* Audio clicks enable 			*/
 static uint8_t config				= 0;
 
-static uint8_t scale_rssi(uint8_t rssi) {
-	uint32_t res = MAX(rssi, MIN_RSSI);
-	res -= MIN_RSSI;
-	res = MIN(res, 255-MIN_RSSI);
-	res*=5;
-	res>>=1; /* scale */
-	res+=MIN_BRIGHTNESS;
-	return MIN(res, MAX_BRIGHTNESS);
+static uint8_t scale_rssi(int8_t rssi) {
+	int32_t res = MAX(rssi, MIN_RSSI);  /* RSSI lower limits */
+	res = MIN(rssi, MAX_RSSI);          /* RSSI upper limit */
+	res -= MIN_RSSI;                    /* -98 .. -56 -> 0 .. 42 */
+	res*=23;                            /* scale to 0 .. 966 */
+	res>>=2;                            /* scale to 0 .. 241 */
+	res+=MIN_BRIGHTNESS;                /* 16 .. 257 */
+	return MIN(res, MAX_BRIGHTNESS);    /* clamp to 255 */
 }
 
 /* smoothly fade out aged RPIs :) */
@@ -92,7 +93,7 @@ static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 	if(age >= age_fadeout)
 		return 0;
 	
-	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(GET_RSSI(rpi->flags_rssi)) : 255;
+	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(GET_RSSI(rpi->flags_rssi)) : UINT8_MAX;
 	
 	/* add 2Hz on/off blinking for Google if persistence mode and Apple/Google visualisation enabled */
 	if((config & CF_PERSISTENCE_EN) && (config & CF_GOOPLE_VISUALIZE) && (!HAS_FLAGS(rpi->flags_rssi))) {
@@ -114,7 +115,8 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active, uin
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
 	uint8_t apple_rpis = 0, google_rpis = 0, flags;
-	uint8_t rssi, best_rssi = 0, _strongest_rpi = 255;
+	int8_t rssi, best_rssi = INT8_MIN;
+	uint8_t _strongest_rpi = UINT8_MAX;
 
 	for(x=0;x<5;x++) {
 		for(y=0;y<5;y++,rpi++) {
@@ -152,7 +154,7 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active, uin
 	return apple_rpis + google_rpis;
 }
 
-static uint8_t seen(uint16_t short_rpi, uint8_t rssi, uint8_t flags_present) {
+static uint8_t seen(uint16_t short_rpi, int8_t rssi, uint8_t flags_present) {
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
 	int idx;
@@ -186,14 +188,12 @@ static uint8_t seen(uint16_t short_rpi, uint8_t rssi, uint8_t flags_present) {
 		rpi->older = newest_rpi;
 		newest_rpi = idx;
 	}
-
-	if(!rssi) {
-		rpi->flags_rssi = 0;
-		return 0;
-	}
 	
-	rssi = (rssi > 128) ? (rssi-128) : 1;
-	rpi->flags_rssi = (flags_present<<7)|rssi;
+	rssi = MIN(rssi, -1); /* clamp to -1 (negative numbers only) */
+	rpi->flags_rssi = (flags_present<<7)|(rssi&0x7f);
+
+	if(rssi == INT8_MIN)
+		return 0;
 	
 	rpi->age = 0;
 	
@@ -218,29 +218,29 @@ static char *tohex(char *dst, const uint8_t *src, uint32_t n) {
 	return dst;
 }
 
-static void exposure_to_uart(const uint8_t *rpi_aem, uint8_t rssi, uint8_t flags_present, uint8_t is_strongest) {
+static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, uint8_t flags_present, uint8_t is_strongest) {
 	char buf[64];
 	char *p = buf;
 	p=tohex(p, rpi_aem, 16);
 	*p=' ';
 	p=tohex(p+1, rpi_aem+16, 4);
 	*p=' ';
-	sprintf(p+1,"%c%c %03d\r\n",flags_present ? 'A' : 'G',is_strongest ? '!' : ' ',rssi); /* unused flag: RFU: indicator for RPI w/ highest RSSI */
+	sprintf(p+1,"%c%c %03d\r\n",flags_present ? 'A' : 'G',is_strongest ? '!' : ' ',rssi);
 	uBit.serial.send(buf, ASYNC);
 }
 
 /* RSSI:
  * 
- * min RSSI: 158
- * max RSSI: ~200
+ * min RSSI: -98
+ * max RSSI: approx. -56
  * 
- * ~5cm distance: 201..204
- * ~1m  distance: 188..191
- * ~3m  distance: 158..172
- * ~5m  distance + wall: 158
- * ~8m distance + 2x wall: 158
+ * ~5cm distance: -55 .. -52
+ * ~1m  distance: -68 .. -65
+ * ~3m  distance: -98 .. -84
+ * ~5m  distance + wall: -98
+ * ~8m distance + 2x wall: -98
  */
-static void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi, uint8_t flags_present) {
+static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, uint8_t flags_present) {
 	uint16_t short_rpi = (rpi_aem[0]<<8)|rpi_aem[1];
 	uint8_t is_strongest = seen(short_rpi, rssi, flags_present);
 	
@@ -254,7 +254,7 @@ static void exposure_rx(const uint8_t *rpi_aem, uint8_t rssi, uint8_t flags_pres
 void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
     uint8_t len = params->advertisingDataLen;
 	const uint8_t *p = params->advertisingData;
-	const uint8_t rssi = params->rssi; /* use for LED brightness */
+	const int8_t rssi = params->rssi; /* use for LED brightness */
 	uint8_t flags_present = 0;
 	
 	/* match Exposure Notification Service Class UUID 0xFD6F 
@@ -363,19 +363,18 @@ static void randomize_age(void) {
 		uint32_t v = uBit.random(RPI_N);
 		if(set&(1<<v)) {
 			set &= ~(1<<v);
-			seen(v, 0, 0);
+			seen(v, INT8_MIN, 0);
 		}
 	}
 }
 
 /* TODO:
+ * - visual: change RSSI -> brightness mapping? gamma correction?
  * 
  * - serial: support serial commands? (e.g. RPI-to-UART en/disable?)
  * - audio: mute clicks from oldest RPI or RPI with highest seen counter instead of highest RSSI?
  * - visual: map age to LED position?
- * - visual: change RSSI -> brightness mapping?
  * - visual: stretch fadeout from RSSI to zero in RSSI-mode?
- * - visual: gamma correction?
  * 
  */
 int main() {
