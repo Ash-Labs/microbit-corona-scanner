@@ -1,5 +1,6 @@
 v0.4.1:
 - serial: prevent garbled lines (check serial buffer space before printing)
+- serial: FIX: display correct RSSI value (value is int8_t not uint8_t)
 
 v0.4:
 - serial: show number of Apple and Google RPIs
