@@ -16,7 +16,16 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.4.1-dev2"
+#define VERSION_STRING	"v0.4.1"
+
+static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
+	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
+	0x1a,0x1c,0x1d,0x1f,0x22,0x25,0x28,0x2e,0x34,0x38,0x3c,0x40,0x44,0x48,0x4b,0x4f,
+	0x55,0x5a,0x5f,0x64,0x69,0x6d,0x72,0x77,0x7d,0x80,0x88,0x8d,0x94,0x9a,0xa0,0xa7,
+	0xac,0xb0,0xb9,0xbf,0xc6,0xcb,0xcf,0xd6,0xe1,0xe9,0xed,0xf1,0xf6,0xfa,0xfe,0xff
+};
+
+#define GAMMA_CORRECT(a)	(gamma_lut[(a)>>2])
 
 struct rpi_s {
 	uint16_t short_rpi;
@@ -108,7 +117,7 @@ static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 		v32 /= RPI_AGE_TIMEOUT;
 		val = v32;
 	}
-	return val;
+	return GAMMA_CORRECT(val);
 }
 
 static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active, uint8_t *google_rpis_active) {
@@ -369,11 +378,10 @@ static void randomize_age(void) {
 }
 
 /* TODO:
- * - visual: change RSSI -> brightness mapping? gamma correction?
  * 
  * - serial: support serial commands? (e.g. RPI-to-UART en/disable?)
  * - audio: mute clicks from oldest RPI or RPI with highest seen counter instead of highest RSSI?
- * - visual: map age to LED position?
+ * - visual: map age/seen counter to LED position?
  * - visual: stretch fadeout from RSSI to zero in RSSI-mode?
  * 
  */
