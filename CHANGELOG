@@ -1,3 +1,6 @@
+v0.4.2:
+- general: Apple/Google distinction removed (there are Android devices with and without flags)
+
 v0.4.1:
 - serial: prevent garbled lines (check serial buffer space before printing)
 - serial: FIX: display correct RSSI value (value is int8_t not uint8_t)

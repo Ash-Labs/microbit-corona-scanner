@@ -16,7 +16,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.4.1"
+#define VERSION_STRING	"v0.4.2"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -61,10 +61,9 @@ static void rpi_list_init(void) {
 
 MicroBit uBit;
 
-static uint32_t google_rpis_seen	= 0;
-static uint32_t apple_rpis_seen		= 0;
-static uint8_t click_request		= 0;
-static uint8_t strongest_rpi			= UINT8_MAX;
+static uint32_t rpis_seen           = 0;
+static uint8_t click_request        = 0;
+static uint8_t strongest_rpi        = UINT8_MAX;
 
 #define MIN_RSSI					(-98)
 #define MAX_RSSI					(-56)
@@ -72,16 +71,14 @@ static uint8_t strongest_rpi			= UINT8_MAX;
 #define MAX_BRIGHTNESS				UINT8_MAX
 
 #define RPI_AGE_TIMEOUT				(50*2)				/* 50 equals 1 second */
-static uint8_t apple_age_fadeout 	= RPI_AGE_TIMEOUT;
-static uint8_t google_age_fadeout	= RPI_AGE_TIMEOUT;
+static uint8_t age_fadeout          = RPI_AGE_TIMEOUT;
 
 /* config bits */
 #define CF_UART_EN					(1<<0)	/* enable USB serial RPI output */
 #define CF_RSSI_BRIGHTNESS			(1<<1)	/* use RSSI for LED brightness 	*/
 #define CF_PERSISTENCE_EN			(1<<2)	/* persistence visualisation 	*/
 #define CF_FADEOUT_EN				(1<<3)	/* fadeout LEDs over time 		*/
-#define CF_GOOPLE_VISUALIZE			(1<<4)	/* Apple/Google visualisation 	*/
-#define CF_CLICK_EN					(1<<5)	/* Audio clicks enable 			*/
+#define CF_CLICK_EN					(1<<4)	/* Audio clicks enable 			*/
 static uint8_t config				= 0;
 
 static uint8_t scale_rssi(int8_t rssi) {
@@ -97,19 +94,11 @@ static uint8_t scale_rssi(int8_t rssi) {
 /* smoothly fade out aged RPIs :) */
 static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 	uint8_t val, age = rpi->age;
-	uint8_t age_fadeout = HAS_FLAGS(rpi->flags_rssi) ? apple_age_fadeout : google_age_fadeout;
 		
 	if(age >= age_fadeout)
 		return 0;
 	
 	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(GET_RSSI(rpi->flags_rssi)) : UINT8_MAX;
-	
-	/* add 2Hz on/off blinking for Google if persistence mode and Apple/Google visualisation enabled */
-	if((config & CF_PERSISTENCE_EN) && (config & CF_GOOPLE_VISUALIZE) && (!HAS_FLAGS(rpi->flags_rssi))) {
-		uint32_t fraction = now&511;
-		if(fraction > 255)
-			return 0;
-	}
 	
 	if(config & CF_FADEOUT_EN) {
 		uint32_t v32 = val;
@@ -120,29 +109,26 @@ static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 	return GAMMA_CORRECT(val);
 }
 
-static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active, uint8_t *google_rpis_active) {
+static uint8_t refresh_screen(unsigned long now) {
 	struct rpi_s *rpi = rpi_list;
-	uint16_t x,y;
-	uint8_t apple_rpis = 0, google_rpis = 0, flags;
+	uint8_t rpis = 0, _strongest_rpi = UINT8_MAX;
 	int8_t rssi, best_rssi = INT8_MIN;
-	uint8_t _strongest_rpi = UINT8_MAX;
-
+	uint16_t x,y;
+	
 	for(x=0;x<5;x++) {
 		for(y=0;y<5;y++,rpi++) {
 			
 			/* ignore dead RPIs */
 			if(rpi->age > RPI_AGE_TIMEOUT)
 				continue;
-			
+
 			/* update active RPIs counter */
-			flags = HAS_FLAGS(rpi->flags_rssi);
-			apple_rpis += flags;
-			google_rpis += (flags^1);
-			
+			rpis++;
+
 			rpi->age++;
-			
+
 			uBit.display.image.setPixelValue(x,y,calc_brightness(rpi, now));
-			
+
 			/* find RPI with highest RSSI */
 			rssi = GET_RSSI(rpi->flags_rssi);
 			if(rssi>best_rssi) {
@@ -151,16 +137,10 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active, uin
 			}
 		}
 	}
-	
+
 	strongest_rpi = _strongest_rpi;
-	
-	if(apple_rpis_active)
-		*apple_rpis_active = apple_rpis;
-	
-	if(google_rpis_active)
-		*google_rpis_active = google_rpis;
-	
-	return apple_rpis + google_rpis;
+
+	return rpis;
 }
 
 static uint8_t seen(uint16_t short_rpi, int8_t rssi, uint8_t flags_present) {
@@ -173,8 +153,7 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, uint8_t flags_present) {
 	
 	/* allocate rpi if not seen yet */
 	if(idx == RPI_N) {
-		apple_rpis_seen += flags_present;
-		google_rpis_seen += (flags_present^1);
+		rpis_seen++;
 		/* reuse oldest rpi slot */
 		idx = oldest_rpi;
 		rpi = rpi_list + idx;
@@ -234,7 +213,7 @@ static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, uint8_t flags_
 	*p=' ';
 	p=tohex(p+1, rpi_aem+16, 4);
 	*p=' ';
-	sprintf(p+1,"%c%c %03d\r\n",flags_present ? 'A' : 'G',is_strongest ? '!' : ' ',rssi);
+	sprintf(p+1,"%c%c %03d\r\n",flags_present ? 'F' : ' ',is_strongest ? '!' : ' ',rssi);
 	uBit.serial.send(buf, ASYNC);
 }
 
@@ -311,11 +290,7 @@ static void mode_change(uint8_t inc) {
 		config &= ~CF_FADEOUT_EN;
 	
 	/* short blinks vs. inactive after 2 seconds */
-	apple_age_fadeout = google_age_fadeout = (mode&1) ? 5  : RPI_AGE_TIMEOUT;
-	if(config & CF_GOOPLE_VISUALIZE) {
-		google_age_fadeout = (mode&1) ? 2 : RPI_AGE_TIMEOUT; /* make Google blinks shorter */
-		apple_age_fadeout = (mode&1) ? 7 : RPI_AGE_TIMEOUT; /* make Apple blinks longer */
-	}
+	age_fadeout = (mode&1) ? 5  : RPI_AGE_TIMEOUT;
 	
 	/* persistence flag */
 	if (mode&1)
@@ -342,16 +317,11 @@ static void mode_change(uint8_t inc) {
  * A long click  : enable RPI output via USB serial
  * 
  * B short click : change visualisation mode
- * B long click  : Apple/Google visualisation on/off
  * 
  */
 void onLongClick(MicroBitEvent e) {
 	if (e.source == MICROBIT_ID_BUTTON_A)
 		config ^= CF_UART_EN;
-	else if (e.source == MICROBIT_ID_BUTTON_B) {
-		config ^= CF_GOOPLE_VISUALIZE;
-		mode_change(0);
-	}
 }
 
 void onClick(MicroBitEvent e) {
@@ -388,7 +358,7 @@ static void randomize_age(void) {
 int main() {
 	uint32_t now = uBit.systemTime();
 	uint32_t last_cntprint = now;	
-	uint8_t clicks_done = 0, sleep_time = 20;
+	uint8_t rpis_active, clicks_done = 0, sleep_time = 20;
 
 	uBit.serial.setTxBufferSize(128);
 
@@ -407,7 +377,8 @@ int main() {
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onClick);
     
 	uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
-	uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
+	// currently unused
+	//uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
 	
 	btle_set_gatt_table_size(BLE_GATTS_ATTR_TAB_SIZE_MIN);
 	
@@ -424,20 +395,17 @@ int main() {
 	click_request++;
 
     while (true) {
-		uint8_t apple_rpis_active = 0, google_rpis_active = 0;
 		
 		uBit.sleep(sleep_time);
 				
 		now = uBit.systemTime();
-		refresh_screen(now, &apple_rpis_active, &google_rpis_active);
+		rpis_active = refresh_screen(now);
 		
 		/* output rpi counter every 10 seconds */
 		if(((now - last_cntprint) >= 10000) && (uBit.serial.txBufferedSize() <= 16)) {
-			char buf[128];
+			char buf[48];
 			last_cntprint = now;
-			sprintf(buf,"RPIs active: %2d (Apple: %2d, Google: %2d) seen: %ld (Apple: %ld, Google: %ld)\r\n",
-				apple_rpis_active + google_rpis_active, apple_rpis_active, google_rpis_active,
-				apple_rpis_seen + google_rpis_seen, apple_rpis_seen, google_rpis_seen);
+			sprintf(buf,"RPIs active: %2d seen: %ld\r\n", rpis_active, rpis_seen);
 			uBit.serial.send(buf, ASYNC);
 		}
 		
