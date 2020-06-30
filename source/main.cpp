@@ -16,7 +16,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.5-dev1"
+#define VERSION_STRING	"v0.5-rc1"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -31,13 +31,15 @@ static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 enum {
 	RAND_BDADDR_NONRESOLVABLE       = 0,
 	RAND_BDADDR_RESOLVABLE          = 1,
-	RAND_BDADDR_TYPE2				= 2,
+	RAND_BDADDR_TYPE_2				= 2,
 	RAND_BDADDR_STATIC				= 3
 };
 
 MicroBit uBit;
 
-static uint32_t rpis_seen           = 0;
+static uint32_t rpis_seen         = 0; /* includes nonresolvable */
+static uint32_t nonresolvable_rpis_seen = 0;
+
 static uint8_t click_request        = 0;
 static uint8_t strongest_rpi        = UINT8_MAX;
 
@@ -47,14 +49,16 @@ static uint8_t strongest_rpi        = UINT8_MAX;
 #define MAX_BRIGHTNESS				UINT8_MAX
 
 #define RPI_AGE_TIMEOUT				(50*2)				/* 50 equals 1 second */
-static uint8_t age_fadeout          = RPI_AGE_TIMEOUT;
+static uint8_t age_fadeout_other          = RPI_AGE_TIMEOUT;
+static uint8_t age_fadeout_nonresolvable  = RPI_AGE_TIMEOUT;
 
 /* config bits */
 #define CF_UART_EN					(1<<0)	/* enable USB serial RPI output */
 #define CF_RSSI_BRIGHTNESS			(1<<1)	/* use RSSI for LED brightness 	*/
 #define CF_PERSISTENCE_EN			(1<<2)	/* persistence visualisation 	*/
 #define CF_FADEOUT_EN				(1<<3)	/* fadeout LEDs over time 		*/
-#define CF_CLICK_EN					(1<<4)	/* Audio clicks enable 			*/
+#define CF_BDTYPE_VISUALIZE			(1<<4)	/* BDADDR type visualisation 	*/
+#define CF_CLICK_EN					(1<<5)	/* Audio clicks enable 			*/
 static uint8_t config				= 0;
 
 struct rpi_s {
@@ -67,8 +71,8 @@ struct rpi_s {
 	uint8_t newer;
 };
 
-#define GET_RAND_BDADDR_TYPE        ((a)->bdaddr_type_rssi>>6)
-#define GET_RSSI(a)                 (((a)->bdaddr_type_rssi&0x3f)+MIN_RSSI)
+#define RPI_BDADDR_TYPE(a)     ((a)->bdaddr_type_rssi>>6)
+#define RPI_RSSI(a)            (((a)->bdaddr_type_rssi&0x3f)+MIN_RSSI)
 
 #define RPI_N 						25
 
@@ -101,12 +105,20 @@ static uint8_t scale_rssi(int8_t rssi) {
 
 /* smoothly fade out aged RPIs :) */
 static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
+	uint8_t age_fadeout = RPI_BDADDR_TYPE(rpi) ? age_fadeout_other : age_fadeout_nonresolvable;
 	uint8_t val, age = rpi->age;
-		
+
 	if(age >= age_fadeout)
 		return 0;
-	
-	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(GET_RSSI(rpi)) : UINT8_MAX;
+
+	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(RPI_RSSI(rpi)) : UINT8_MAX;
+
+	/* add 2Hz on/off blinking for resolvable devices if persistence mode and non-/resolvable visualisation enabled */
+	if((config & CF_PERSISTENCE_EN) && (config & CF_BDTYPE_VISUALIZE) && (RPI_BDADDR_TYPE(rpi))) {
+		uint32_t fraction = now&511;
+		if(fraction > 255)
+			return 0;
+	}
 	
 	if(config & CF_FADEOUT_EN) {
 		uint32_t v32 = val;
@@ -117,9 +129,9 @@ static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 	return GAMMA_CORRECT(val);
 }
 
-static uint8_t refresh_screen(unsigned long now) {
+static uint8_t refresh_screen(unsigned long now, uint8_t *nonresolvable_rpis_active) {
 	struct rpi_s *rpi = rpi_list;
-	uint8_t rpis = 0, _strongest_rpi = UINT8_MAX;
+	uint8_t nonresolvable_rpis = 0, rpis = 0, _strongest_rpi = UINT8_MAX;
 	int8_t rssi, best_rssi = INT8_MIN;
 	uint16_t x,y;
 	
@@ -132,13 +144,14 @@ static uint8_t refresh_screen(unsigned long now) {
 
 			/* update active RPIs counter */
 			rpis++;
+			nonresolvable_rpis_active += (RPI_BDADDR_TYPE(rpi) == RAND_BDADDR_NONRESOLVABLE);
 
 			rpi->age++;
 
 			uBit.display.image.setPixelValue(x,y,calc_brightness(rpi, now));
 
 			/* find RPI with highest RSSI */
-			rssi = GET_RSSI(rpi);
+			rssi = RPI_RSSI(rpi);
 			if(rssi>best_rssi) {
 				best_rssi = rssi;
 				_strongest_rpi = rpi - rpi_list;
@@ -147,6 +160,9 @@ static uint8_t refresh_screen(unsigned long now) {
 	}
 
 	strongest_rpi = _strongest_rpi;
+
+	if(nonresolvable_rpis_active)
+		*nonresolvable_rpis_active = nonresolvable_rpis;
 
 	return rpis;
 }
@@ -162,6 +178,7 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr) {
 	/* allocate rpi if not seen yet */
 	if(idx == RPI_N) {
 		rpis_seen++;
+		nonresolvable_rpis_seen += (RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE);
 		/* reuse oldest rpi slot */
 		idx = oldest_rpi;
 		rpi = rpi_list + idx;
@@ -308,7 +325,11 @@ static void mode_change(uint8_t inc) {
 		config &= ~CF_FADEOUT_EN;
 	
 	/* short blinks vs. inactive after 2 seconds */
-	age_fadeout = (mode&1) ? 5  : RPI_AGE_TIMEOUT;
+	age_fadeout_nonresolvable = age_fadeout_other = (mode&1) ? 5  : RPI_AGE_TIMEOUT;
+	if(config & CF_BDTYPE_VISUALIZE) {
+		age_fadeout_nonresolvable = (mode&1) ? 7 : RPI_AGE_TIMEOUT; /* make 'normal' blinks longer */
+		age_fadeout_other         = (mode&1) ? 2 : RPI_AGE_TIMEOUT; /* make resolvable blinks shorter */
+	}
 	
 	/* persistence flag */
 	if (mode&1)
@@ -335,11 +356,16 @@ static void mode_change(uint8_t inc) {
  * A long click  : enable RPI output via USB serial
  * 
  * B short click : change visualisation mode
+ * B long click  : bdaddr type visualisation on/off
  * 
  */
 void onLongClick(MicroBitEvent e) {
 	if (e.source == MICROBIT_ID_BUTTON_A)
 		config ^= CF_UART_EN;
+	else if (e.source == MICROBIT_ID_BUTTON_B) {
+		config ^= CF_BDTYPE_VISUALIZE;
+		mode_change(0);
+	}
 }
 
 void onClick(MicroBitEvent e) {
@@ -376,7 +402,7 @@ static void randomize_age(void) {
 int main() {
 	uint32_t now = uBit.systemTime();
 	uint32_t last_cntprint = now;	
-	uint8_t rpis_active, clicks_done = 0, sleep_time = 20;
+	uint8_t rpis_active, nonresolvable_rpis_active, clicks_done = 0, sleep_time = 20;
 
 	uBit.serial.setTxBufferSize(128);
 
@@ -395,8 +421,7 @@ int main() {
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onClick);
     
 	uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
-	// currently unused
-	//uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
+	uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
 	
 	btle_set_gatt_table_size(BLE_GATTS_ATTR_TAB_SIZE_MIN);
 	
@@ -417,13 +442,15 @@ int main() {
 		uBit.sleep(sleep_time);
 				
 		now = uBit.systemTime();
-		rpis_active = refresh_screen(now);
+		rpis_active = refresh_screen(now, &nonresolvable_rpis_active);
 		
 		/* output rpi counter every 10 seconds */
 		if(((now - last_cntprint) >= 10000) && (uBit.serial.txBufferedSize() <= 16)) {
-			char buf[48];
+			char buf[128];
 			last_cntprint = now;
-			sprintf(buf,"RPIs active: %2d seen: %ld\r\n", rpis_active, rpis_seen);
+			sprintf(buf,"RPIs active: %2d (Apple: %2d, Google: %2d) seen: %ld (Apple: %ld, Google: %ld)\r\n",
+				rpis_active, nonresolvable_rpis_active, rpis_active - nonresolvable_rpis_active,
+				rpis_seen,   nonresolvable_rpis_seen,   rpis_seen   - nonresolvable_rpis_seen);
 			uBit.serial.send(buf, ASYNC);
 		}
 		
