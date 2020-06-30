@@ -27,6 +27,8 @@ static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 
 #define GAMMA_CORRECT(a)	(gamma_lut[(a)>>2])
 
+#define RAND_BDADDR_TYPE(a)      ((a)[5]>>6)
+
 struct rpi_s {
 	uint16_t short_rpi;
 	uint8_t flags_rssi;				/* flags present: 0x80, RSSI mask: 0x7f */
@@ -206,14 +208,19 @@ static char *tohex(char *dst, const uint8_t *src, uint32_t n) {
 	return dst;
 }
 
-static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, uint8_t flags_present, uint8_t is_strongest) {
-	char buf[64];
-	char *p = buf;
+static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, uint8_t flags_present, const uint8_t *peer_addr, uint8_t is_strongest) {
+	char buf[64], *p=buf;
+	/*
+	char buf[80], *p=buf;
+	p=tohex(buf, peer_addr, 6);
+	p=' ';
+	p++;
+	*/
 	p=tohex(p, rpi_aem, 16);
 	*p=' ';
 	p=tohex(p+1, rpi_aem+16, 4);
 	*p=' ';
-	sprintf(p+1,"%c%c %03d\r\n",flags_present ? 'F' : ' ',is_strongest ? '!' : ' ',rssi);
+	sprintf(p+1, "%c%c%c %03d\r\n", '0'+RAND_BDADDR_TYPE(peer_addr), flags_present ? 'F' : ' ', is_strongest ? '!' : ' ', rssi);
 	uBit.serial.send(buf, ASYNC);
 }
 
@@ -228,14 +235,14 @@ static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, uint8_t flags_
  * ~5m  distance + wall: -98
  * ~8m distance + 2x wall: -98
  */
-static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, uint8_t flags_present) {
+static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, uint8_t flags_present, const uint8_t *peer_addr) {
 	uint16_t short_rpi = (rpi_aem[0]<<8)|rpi_aem[1];
 	uint8_t is_strongest = seen(short_rpi, rssi, flags_present);
 	
 	click_request += (is_strongest ^ 1);
 	
 	if((config & CF_UART_EN) && (uBit.serial.txBufferedSize() <= 64)) /* prevent garbled lines */
-		exposure_to_uart(rpi_aem, rssi, flags_present, is_strongest);
+		exposure_to_uart(rpi_aem, rssi, flags_present, peer_addr, is_strongest);
 }
 
 /* see https://os.mbed.com/docs/mbed-os/v5.15/mbed-os-api-doxy/struct_gap_1_1_advertisement_callback_params__t.html */
@@ -262,7 +269,7 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	}
 	
 	if((len == 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd))
-		exposure_rx(p+8, rssi, flags_present);
+		exposure_rx(p+8, rssi, flags_present, params->peerAddr);
 }
 
 static void audible_click(void) {
