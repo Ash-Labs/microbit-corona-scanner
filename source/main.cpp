@@ -16,7 +16,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.4.2"
+#define VERSION_STRING	"v0.5-dev1"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -28,38 +28,12 @@ static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 #define GAMMA_CORRECT(a)	(gamma_lut[(a)>>2])
 
 #define RAND_BDADDR_TYPE(a)      ((a)[5]>>6)
-
-struct rpi_s {
-	uint16_t short_rpi;
-	uint8_t flags_rssi;				/* flags present: 0x80, RSSI mask: 0x7f */
-	uint8_t age;
-	
-	/* tiny age-sorted linked list w/o pointers to save precious RAM */
-	uint8_t older;
-	uint8_t newer;
+enum {
+	RAND_BDADDR_NONRESOLVABLE       = 0,
+	RAND_BDADDR_RESOLVABLE          = 1,
+	RAND_BDADDR_TYPE2				= 2,
+	RAND_BDADDR_STATIC				= 3
 };
-
-#define HAS_FLAGS(a) 				((a)>>7)
-#define GET_RSSI(a)					(((a)&0x7f)|0x80)
-
-#define RPI_N 						25
-
-static struct rpi_s rpi_list[RPI_N];
-static uint8_t 		oldest_rpi 		= 0;
-static uint8_t 		newest_rpi 		= RPI_N - 1;
-
-static void rpi_list_init(void) {
-	struct rpi_s *rpi = rpi_list;
-	int i;
-	
-	/* initialize linked list for aging */
-	for(i=0; i<RPI_N; i++,rpi++) {
-		rpi->older = (i-1)&UINT8_MAX;
-		rpi->newer = i+1;
-		rpi->short_rpi = i;
-		rpi->age = UINT8_MAX;
-	}
-}
 
 MicroBit uBit;
 
@@ -83,6 +57,38 @@ static uint8_t age_fadeout          = RPI_AGE_TIMEOUT;
 #define CF_CLICK_EN					(1<<4)	/* Audio clicks enable 			*/
 static uint8_t config				= 0;
 
+struct rpi_s {
+	uint16_t short_rpi;
+	uint8_t bdaddr_type_rssi;				/* bdaddr type mask: 0xc0, RSSI mask: 0x3f */
+	uint8_t age;
+	
+	/* tiny age-sorted linked list w/o pointers to save precious RAM */
+	uint8_t older;
+	uint8_t newer;
+};
+
+#define GET_RAND_BDADDR_TYPE        ((a)->bdaddr_type_rssi>>6)
+#define GET_RSSI(a)                 (((a)->bdaddr_type_rssi&0x3f)+MIN_RSSI)
+
+#define RPI_N 						25
+
+static struct rpi_s rpi_list[RPI_N];
+static uint8_t 		oldest_rpi 		= 0;
+static uint8_t 		newest_rpi 		= RPI_N - 1;
+
+static void rpi_list_init(void) {
+	struct rpi_s *rpi = rpi_list;
+	int i;
+	
+	/* initialize linked list for aging */
+	for(i=0; i<RPI_N; i++,rpi++) {
+		rpi->older = (i-1)&UINT8_MAX;
+		rpi->newer = i+1;
+		rpi->short_rpi = i;
+		rpi->age = UINT8_MAX;
+	}
+}
+
 static uint8_t scale_rssi(int8_t rssi) {
 	int32_t res = MAX(rssi, MIN_RSSI);  /* RSSI lower limits */
 	res = MIN(rssi, MAX_RSSI);          /* RSSI upper limit */
@@ -100,7 +106,7 @@ static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 	if(age >= age_fadeout)
 		return 0;
 	
-	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(GET_RSSI(rpi->flags_rssi)) : UINT8_MAX;
+	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(GET_RSSI(rpi)) : UINT8_MAX;
 	
 	if(config & CF_FADEOUT_EN) {
 		uint32_t v32 = val;
@@ -132,7 +138,7 @@ static uint8_t refresh_screen(unsigned long now) {
 			uBit.display.image.setPixelValue(x,y,calc_brightness(rpi, now));
 
 			/* find RPI with highest RSSI */
-			rssi = GET_RSSI(rpi->flags_rssi);
+			rssi = GET_RSSI(rpi);
 			if(rssi>best_rssi) {
 				best_rssi = rssi;
 				_strongest_rpi = rpi - rpi_list;
@@ -145,7 +151,7 @@ static uint8_t refresh_screen(unsigned long now) {
 	return rpis;
 }
 
-static uint8_t seen(uint16_t short_rpi, int8_t rssi, uint8_t flags_present) {
+static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr) {
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
 	int idx;
@@ -178,12 +184,17 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, uint8_t flags_present) {
 		rpi->older = newest_rpi;
 		newest_rpi = idx;
 	}
-	
-	rssi = MIN(rssi, -1); /* clamp to -1 (negative numbers only) */
-	rpi->flags_rssi = (flags_present<<7)|(rssi&0x7f);
 
-	if(rssi == INT8_MIN)
+	if(rssi == INT8_MIN) {
+		rpi->bdaddr_type_rssi = 0;
 		return 0;
+	}
+	
+	rssi -= MIN_RSSI;
+	rssi = MAX(rssi, 0);
+	rssi = MIN(rssi, 0x3f);
+	
+	rpi->bdaddr_type_rssi = (RAND_BDADDR_TYPE(peer_addr)<<6) | rssi;
 	
 	rpi->age = 0;
 	
@@ -237,7 +248,7 @@ static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, uint8_t flags_
  */
 static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, uint8_t flags_present, const uint8_t *peer_addr) {
 	uint16_t short_rpi = (rpi_aem[0]<<8)|rpi_aem[1];
-	uint8_t is_strongest = seen(short_rpi, rssi, flags_present);
+	uint8_t is_strongest = seen(short_rpi, rssi, peer_addr);
 	
 	click_request += (is_strongest ^ 1);
 	
