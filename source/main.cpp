@@ -170,7 +170,7 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, uint8_t flags_present) {
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
-	uint8_t is_apple;
+	uint8_t likely_apple;
 	int idx;
 	
 	/* try to find rpi in list */
@@ -206,9 +206,9 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, u
 	if(!peer_addr)
 		return 0;
 
-	is_apple = (RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE) && flags_present;
+	likely_apple = (RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE) && flags_present;
 	rssi = MIN(rssi, -1); /* clamp to -1 (negative numbers only) */
-	rpi->devtype_rssi = (is_apple<<7)|(rssi&0x7f);
+	rpi->devtype_rssi = (likely_apple<<7)|(rssi&0x7f);
 
 	rpi->age = 0;
 
