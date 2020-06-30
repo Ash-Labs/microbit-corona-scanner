@@ -16,7 +16,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.5-dev2"
+#define VERSION_STRING	"v0.5-rc2"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -63,22 +63,18 @@ static uint8_t config				= 0;
 
 struct rpi_s {
 	uint16_t short_rpi;
-	uint8_t rssi;
+	uint8_t devtype_rssi;
 	uint8_t age;
-	uint8_t device_info;		/* flags and bdaddr type */
-	uint8_t rfu;
 	
 	/* tiny age-sorted linked list w/o pointers to save precious RAM */
 	uint8_t older;
 	uint8_t newer;
 };
 
-#define RPI_DEVICEINFO_NOFLAGS			0x80
-#define RPI_DEVICEINFO_ADDRTYPE_MASK	3
+#define RPI_DEVICE_APPLE(a)         ((a)->devtype_rssi>>7)
+#define RPI_RSSI(a)                 ((a)->devtype_rssi|0x80)
 
-#define RPI_DEVICE_APPLE(a)				(!((a)->device_info))
-
-#define RPI_N 							25
+#define RPI_N                       25
 
 static struct rpi_s rpi_list[RPI_N];
 static uint8_t 		oldest_rpi 		= 0;
@@ -115,7 +111,7 @@ static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 	if(age >= age_fadeout)
 		return 0;
 
-	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(rpi->rssi) : UINT8_MAX;
+	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(RPI_RSSI(rpi)) : UINT8_MAX;
 
 	/* add 2Hz on/off blinking for resolvable devices if persistence mode and non-/resolvable visualisation enabled */
 	if((config & CF_PERSISTENCE_EN) && (config & CF_DEVTYPE_VISUALIZE) && (!RPI_DEVICE_APPLE(rpi))) {
@@ -136,7 +132,7 @@ static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 	struct rpi_s *rpi = rpi_list;
 	uint8_t apple_rpis = 0, rpis = 0, _strongest_rpi = UINT8_MAX;
-	int8_t best_rssi = INT8_MIN;
+	int8_t rssi, best_rssi = INT8_MIN;
 	uint16_t x,y;
 	
 	for(x=0;x<5;x++) {
@@ -155,8 +151,9 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 			uBit.display.image.setPixelValue(x,y,calc_brightness(rpi, now));
 
 			/* find RPI with highest RSSI */
-			if(rpi->rssi>best_rssi) {
-				best_rssi = rpi->rssi;
+			rssi = RPI_RSSI(rpi);
+			if(rssi>best_rssi) {
+				best_rssi = rssi;
 				_strongest_rpi = rpi - rpi_list;
 			}
 		}
@@ -173,6 +170,7 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, uint8_t flags_present) {
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
+	uint8_t is_apple;
 	int idx;
 	
 	/* try to find rpi in list */
@@ -205,12 +203,12 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, u
 		newest_rpi = idx;
 	}
 
-	rpi->rssi = rssi;
-
 	if(!peer_addr)
 		return 0;
 
-	rpi->device_info = ((flags_present^1)<<7) | RAND_BDADDR_TYPE(peer_addr);
+	is_apple = (RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE) && flags_present;
+	rssi = MIN(rssi, -1); /* clamp to -1 (negative numbers only) */
+	rpi->devtype_rssi = (is_apple<<7)|(rssi&0x7f);
 
 	rpi->age = 0;
 
