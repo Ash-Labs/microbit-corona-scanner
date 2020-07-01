@@ -16,7 +16,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.5"
+#define VERSION_STRING	"v0.6-dev1"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -129,6 +129,10 @@ static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 	return GAMMA_CORRECT(val);
 }
 
+static void set_pixel(int16_t x , int16_t y, uint8_t value) {
+	uBit.display.image.setPixelValue(x,y,value);
+}
+
 static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 	struct rpi_s *rpi = rpi_list;
 	uint8_t apple_rpis = 0, rpis = 0, _strongest_rpi = UINT8_MAX;
@@ -148,7 +152,7 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 
 			rpi->age++;
 
-			uBit.display.image.setPixelValue(x,y,calc_brightness(rpi, now));
+			set_pixel(x,y,calc_brightness(rpi, now));
 
 			/* find RPI with highest RSSI */
 			rssi = RPI_RSSI(rpi);
@@ -214,7 +218,7 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, u
 
 	x = idx/5;
 	y = idx%5;
-	uBit.display.image.setPixelValue(x,y,calc_brightness(rpi, uBit.systemTime()));
+	set_pixel(x,y,calc_brightness(rpi, uBit.systemTime()));
 
 	return idx == strongest_rpi;
 }
