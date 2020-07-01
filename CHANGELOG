@@ -1,3 +1,6 @@
+v0.5:
+- general: Apple/Google distinction added again - based on bdaddr type and absence of flags
+
 v0.4.2:
 - general: Apple/Google distinction removed (there are Android devices with and without flags)
 
