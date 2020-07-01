@@ -2,6 +2,7 @@
 #include "MicroBit.h"
 #include "ble/DiscoveredCharacteristic.h"
 #include "ble/DiscoveredService.h"
+#include "is31fl3738.h"
 
 #if YOTTA_CFG_MICROBIT_S130 != 1
 #error This code *only* works with the Nordic S130 softdevice
@@ -16,7 +17,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.6-dev1"
+#define VERSION_STRING	"v0.6-ext_leds-dev1"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -59,6 +60,7 @@ static uint8_t age_fadeout_other    = RPI_AGE_TIMEOUT;
 #define CF_FADEOUT_EN				(1<<3)	/* fadeout LEDs over time 		*/
 #define CF_DEVTYPE_VISUALIZE		(1<<4)	/* device type visualisation 	*/
 #define CF_CLICK_EN					(1<<5)	/* Audio clicks enable 			*/
+#define CF_EXTLEDS_EN				(1<<6)	/* use external LEDs			*/
 static uint8_t config				= 0;
 
 struct rpi_s {
@@ -131,6 +133,8 @@ static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 
 static void set_pixel(int16_t x , int16_t y, uint8_t value) {
 	uBit.display.image.setPixelValue(x,y,value);
+	if(config & CF_EXTLEDS_EN)
+		is31fl3738_setPixel(x,y,value);
 }
 
 static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
@@ -417,6 +421,11 @@ int main() {
 	/* display project identifier and version string both via LEDs and USB serial */
 	uBit.display.scroll("cs-" VERSION_STRING, MICROBIT_DEFAULT_SCROLL_SPEED/2);
 	uBit.serial.send("corona-scanner " VERSION_STRING "\r\n", SYNC_SPINWAIT);
+
+	if(is31fl3738_init() == MICROBIT_OK) {
+		uBit.serial.send("using IS31FL3738 output\r\n", SYNC_SPINWAIT);
+		config |= CF_EXTLEDS_EN;
+	}
 
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onClick);
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onClick);
