@@ -1,3 +1,6 @@
+v0.5.1:
+- general: BUGFIX for number of active Apple RPIs
+
 v0.5:
 - general: Apple/Google distinction added again - based on bdaddr type and absence of flags
 
