@@ -152,7 +152,7 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 
 			/* update active RPIs counter */
 			rpis++;
-			apple_rpis_active += RPI_DEVICE_APPLE(rpi);
+			apple_rpis += RPI_DEVICE_APPLE(rpi);
 
 			rpi->age++;
 
