@@ -7,8 +7,17 @@
 #define DATA(n)        (n)
 #define INIT_END       0
 
+#define MIN(a,b) (((a) < (b)) ? (a) : (b))
+#define MAX(a,b) (((a) > (b)) ? (a) : (b))
+
 static const uint8_t init_data[] __attribute__ ((aligned (4))) = {
-	CMD(IS31FL3738_CMD_LEDCTL), DATA(4), 0x00, 0x03, 0x00, 0x03,      /* turn LEDs on */
+	CMD(IS31FL3738_CMD_LEDCTL), DATA(4), 0x00, 0x03, 0x00, 0x03,      /* turn LED 1A on */
+	//CMD(IS31FL3738_CMD_LEDCTL), DATA(21), 0x00,                      /* turn 5x5 LEDs on */
+    //    0xff, 0x03, 0xff, 0x03,  /* SW1 */
+    //    0xff, 0x03, 0xff, 0x03,  /* SW2 */ 
+    //    0xff, 0x03, 0xff, 0x03,  /* SW3 */
+    //    0xff, 0x03, 0xff, 0x03,  /* SW4 */
+    //    0xff, 0x03, 0xff, 0x03,  /* SW5 */
 	CMD(IS31FL3738_CMD_FUNC),   DATA(3), 0x00, 0x01, 0xff,            /* normal operation, set GCRR to 255 */
 	CMD(IS31FL3738_CMD_PWM),                                          /* switch to PWM page access */
 	DATA(3), 0x00, 0x40, 0x40, /* PWM test data */
@@ -66,10 +75,26 @@ int is31fl3738_init(void) {
 	return MICROBIT_OK;
 }
 
+static uint8_t led_cache[25];
+static uint8_t led_update_start = UINT8_MAX;
+static uint8_t led_update_end   = 0;
+
 void is31fl3738_update(void) {
 	
+	/* TODO */
+	
+	led_update_start = UINT8_MAX;
+	led_update_end   = 0;
 }
 
 void is31fl3738_setPixel(int16_t x , int16_t y, uint8_t value, uint8_t draw_now) {
+	uint8_t idx = x*5+y;
 	
+	led_cache[idx] = value;
+	
+	led_update_start = MIN(led_update_start, idx);
+	led_update_end   = MAX(led_update_end,   idx);
+	
+	if(draw_now)
+		is31fl3738_update();
 }
