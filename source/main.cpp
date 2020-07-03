@@ -2,6 +2,7 @@
 #include "MicroBit.h"
 #include "ble/DiscoveredCharacteristic.h"
 #include "ble/DiscoveredService.h"
+#include "is31fl3738.h"
 
 #if YOTTA_CFG_MICROBIT_S130 != 1
 #error This code *only* works with the Nordic S130 softdevice
@@ -16,7 +17,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.6-dev2"
+#define VERSION_STRING	"v0.6-dev3"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -48,6 +49,9 @@ static uint8_t strongest_rpi        = UINT8_MAX;
 #define MIN_BRIGHTNESS				16
 #define MAX_BRIGHTNESS				UINT8_MAX
 
+#define REFRESH_HZ                  50
+#define REFRESH_DELAY               (1000/REFRESH_HZ)
+
 #define RPI_AGE_TIMEOUT				(50*2)				/* 50 equals 1 second */
 static uint8_t age_fadeout_apple    = RPI_AGE_TIMEOUT;
 static uint8_t age_fadeout_other    = RPI_AGE_TIMEOUT;
@@ -59,6 +63,7 @@ static uint8_t age_fadeout_other    = RPI_AGE_TIMEOUT;
 #define CF_FADEOUT_EN				(1<<3)	/* fadeout LEDs over time 		*/
 #define CF_DEVTYPE_VISUALIZE		(1<<4)	/* device type visualisation 	*/
 #define CF_CLICK_EN					(1<<5)	/* Audio clicks enable 			*/
+#define CF_EXTLEDS_EN				(1<<6)	/* use external LEDs			*/
 static uint8_t config				= 0;
 
 struct rpi_s {
@@ -70,6 +75,8 @@ struct rpi_s {
 	uint8_t older;
 	uint8_t newer;
 };
+
+#define APPLE_FLAGS                 0x1A
 
 #define RPI_DEVICE_APPLE(a)         ((a)->devtype_rssi>>7)
 #define RPI_RSSI(a)                 ((a)->devtype_rssi|0x80)
@@ -131,6 +138,13 @@ static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 
 static void set_pixel(int16_t x , int16_t y, uint8_t value) {
 	uBit.display.image.setPixelValue(x,y,value);
+	if(config & CF_EXTLEDS_EN)
+		is31fl3738_setPixel(x,y,value);
+}
+
+static void update_display(void) {
+	if(config & CF_EXTLEDS_EN)
+		is31fl3738_update();
 }
 
 static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
@@ -139,8 +153,8 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 	int8_t rssi, best_rssi = INT8_MIN;
 	uint16_t x,y;
 	
-	for(x=0;x<5;x++) {
-		for(y=0;y<5;y++,rpi++) {
+	for(y=0;y<5;y++) {
+		for(x=0;x<5;x++,rpi++) {
 			
 			/* ignore dead RPIs */
 			if(rpi->age > RPI_AGE_TIMEOUT)
@@ -163,6 +177,8 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 		}
 	}
 
+	update_display();
+
 	strongest_rpi = _strongest_rpi;
 
 	if(apple_rpis_active)
@@ -171,7 +187,7 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 	return rpis;
 }
 
-static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, uint8_t flags_present) {
+static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, int adv_flags) {
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
 	uint8_t likely_apple;
@@ -183,7 +199,7 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, u
 	/* allocate rpi if not seen yet */
 	if(idx == RPI_N) {
 		rpis_seen++;
-		apple_rpis_seen += ((RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE) && flags_present);
+		apple_rpis_seen += ((RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE) && (adv_flags == APPLE_FLAGS));
 		/* reuse oldest rpi slot */
 		idx = oldest_rpi;
 		rpi = rpi_list + idx;
@@ -210,14 +226,14 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, u
 	if(!peer_addr)
 		return 0;
 
-	likely_apple = (RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE) && flags_present;
+	likely_apple = (RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE) && (adv_flags == APPLE_FLAGS);
 	rssi = MIN(rssi, -1); /* clamp to -1 (negative numbers only) */
 	rpi->devtype_rssi = (likely_apple<<7)|(rssi&0x7f);
 
 	rpi->age = 0;
 
-	x = idx/5;
-	y = idx%5;
+	y = idx/5;
+	x = idx%5;
 	set_pixel(x,y,calc_brightness(rpi, uBit.systemTime()));
 
 	return idx == strongest_rpi;
@@ -237,7 +253,7 @@ static char *tohex(char *dst, const uint8_t *src, uint32_t n) {
 	return dst;
 }
 
-static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer_addr, uint8_t flags_present, uint8_t is_strongest) {
+static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer_addr, int adv_flags, uint8_t is_strongest) {
 	char buf[64], *p=buf;
 	/*
 	char buf[80], *p=buf;
@@ -247,9 +263,21 @@ static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, const uint8_t 
 	*/
 	p=tohex(p, rpi_aem, 16);
 	*p=' ';
+	
 	p=tohex(p+1, rpi_aem+16, 4);
 	*p=' ';
-	sprintf(p+1, "%c%c%c %03d\r\n", '0'+RAND_BDADDR_TYPE(peer_addr), flags_present ? 'F' : ' ', is_strongest ? '!' : ' ', rssi);
+	
+	p[1]='0'+RAND_BDADDR_TYPE(peer_addr);
+	
+	if(adv_flags >= 0) {
+		p[2]=nibble2hex(adv_flags>>4);
+		p[3]=nibble2hex(adv_flags&0xf);
+	}
+	else
+		p[2]=p[3]='-';
+	
+	p[4]=' ';
+	sprintf(p+5, "%03d%c\r\n", rssi, is_strongest ? '!' : ' ');
 	uBit.serial.send(buf, ASYNC);
 }
 
@@ -264,14 +292,14 @@ static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, const uint8_t 
  * ~5m  distance + wall: -98
  * ~8m distance + 2x wall: -98
  */
-static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer_addr, uint8_t flags_present) {
+static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer_addr, int adv_flags) {
 	uint16_t short_rpi = (rpi_aem[0]<<8)|rpi_aem[1];
-	uint8_t is_strongest = seen(short_rpi, rssi, peer_addr, flags_present);
+	uint8_t is_strongest = seen(short_rpi, rssi, peer_addr, adv_flags);
 	
 	click_request += (is_strongest ^ 1);
 	
 	if((config & CF_UART_EN) && (uBit.serial.txBufferedSize() <= 64)) /* prevent garbled lines */
-		exposure_to_uart(rpi_aem, rssi, peer_addr, flags_present, is_strongest);
+		exposure_to_uart(rpi_aem, rssi, peer_addr, adv_flags, is_strongest);
 }
 
 /* see https://os.mbed.com/docs/mbed-os/v5.15/mbed-os-api-doxy/struct_gap_1_1_advertisement_callback_params__t.html */
@@ -279,7 +307,7 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
     uint8_t len = params->advertisingDataLen;
 	const uint8_t *p = params->advertisingData;
 	const int8_t rssi = params->rssi; /* use for LED brightness */
-	uint8_t flags_present = 0;
+	int adv_flags = -1;
 	
 	/* match Exposure Notification Service Class UUID 0xFD6F 
 	 * 
@@ -290,15 +318,14 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	 * 17 16 6ffd 660a6af67f7e946b3c3ce253dae9b411 78b0e9c2 (rpi, aem)
 	 * */
 	
-	/* 02 01 1a only sent by iOS !??? */
-	if((len == 31) && (p[0] == 2) && (p[1] == 1) && (p[2] == 0x1a)) {
+	if((len >= 31) && (p[0] == 2) && (p[1] == 1)) {
+		adv_flags = p[2];
 		p+=3;
 		len-=3;
-		flags_present = 1;
 	}
 	
-	if((len == 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd))
-		exposure_rx(p+8, rssi, params->peerAddr, flags_present);
+	if((len >= 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd))
+		exposure_rx(p+8, rssi, params->peerAddr, adv_flags);
 }
 
 static void audible_click(void) {
@@ -392,6 +419,20 @@ static void randomize_age(void) {
 	}
 }
 
+static uint32_t wait_until(uint32_t end) {
+	uint32_t ts1 = uBit.systemTime(), ts2;
+	if(ts1 >= end)
+		return ts1;
+	uBit.sleep(end-ts1);
+	ts2 = uBit.systemTime();
+	/*
+	char buf[32];
+	sprintf(buf,"wait %ld\r\n",end-ts1);
+	uBit.serial.send(buf,ASYNC);
+	*/
+	return ts2;
+}
+
 /* TODO:
  * 
  * - serial: support serial commands? (e.g. RPI-to-UART en/disable?)
@@ -402,8 +443,8 @@ static void randomize_age(void) {
  */
 int main() {
 	uint32_t now = uBit.systemTime();
-	uint32_t last_cntprint = now;	
-	uint8_t rpis_active, apple_rpis_active, clicks_done = 0, sleep_time = 20;
+	uint32_t last_cntprint = now;
+	uint8_t rpis_active, apple_rpis_active, clicks_done = 0, sleep_time = REFRESH_DELAY;
 
 	uBit.serial.setTxBufferSize(128);
 
@@ -417,6 +458,11 @@ int main() {
 	/* display project identifier and version string both via LEDs and USB serial */
 	uBit.display.scroll("cs-" VERSION_STRING, MICROBIT_DEFAULT_SCROLL_SPEED/2);
 	uBit.serial.send("corona-scanner " VERSION_STRING "\r\n", SYNC_SPINWAIT);
+
+	if(is31fl3738_init() == MICROBIT_OK) {
+		uBit.serial.send("using IS31FL3738 output\r\n", SYNC_SPINWAIT);
+		config |= CF_EXTLEDS_EN;
+	}
 
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onClick);
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onClick);
@@ -439,12 +485,10 @@ int main() {
 	click_request++;
 
     while (true) {
+		now = wait_until(now + sleep_time);
 		
-		uBit.sleep(sleep_time);
-				
-		now = uBit.systemTime();
 		rpis_active = refresh_screen(now, &apple_rpis_active);
-		
+
 		/* output rpi counter every 10 seconds */
 		if(((now - last_cntprint) >= 10000) && (uBit.serial.txBufferedSize() <= 16)) {
 			char buf[128];
@@ -455,12 +499,12 @@ int main() {
 			uBit.serial.send(buf, ASYNC);
 		}
 		
-		sleep_time = 20;
+		sleep_time = REFRESH_DELAY;
 		if(clicks_done != click_request) {
 			clicks_done = click_request;
 			if(config & CF_CLICK_EN) {
 				audible_click();
-				sleep_time = 19;
+				sleep_time--;
 			}
 		}
     }
