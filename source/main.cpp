@@ -49,6 +49,9 @@ static uint8_t strongest_rpi        = UINT8_MAX;
 #define MIN_BRIGHTNESS				16
 #define MAX_BRIGHTNESS				UINT8_MAX
 
+#define REFRESH_HZ                  50
+#define REFRESH_DELAY               (1000/REFRESH_HZ)
+
 #define RPI_AGE_TIMEOUT				(50*2)				/* 50 equals 1 second */
 static uint8_t age_fadeout_apple    = RPI_AGE_TIMEOUT;
 static uint8_t age_fadeout_other    = RPI_AGE_TIMEOUT;
@@ -428,7 +431,7 @@ static uint32_t wait_until(uint32_t end) {
 int main() {
 	uint32_t now = uBit.systemTime();
 	uint32_t last_cntprint = now;
-	uint8_t rpis_active, apple_rpis_active, clicks_done = 0, sleep_time = 20;
+	uint8_t rpis_active, apple_rpis_active, clicks_done = 0, sleep_time = REFRESH_DELAY;
 
 	uBit.serial.setTxBufferSize(128);
 
@@ -483,12 +486,12 @@ int main() {
 			uBit.serial.send(buf, ASYNC);
 		}
 		
-		sleep_time = 20;
+		sleep_time = REFRESH_DELAY;
 		if(clicks_done != click_request) {
 			clicks_done = click_request;
 			if(config & CF_CLICK_EN) {
 				audible_click();
-				sleep_time = 19;
+				sleep_time--;
 			}
 		}
     }
