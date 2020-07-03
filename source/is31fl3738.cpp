@@ -61,6 +61,25 @@ static int is31fl3738_cmd(uint8_t cmd) {
 
 static uint8_t pwm_cache[PWM_REGS+1];     /* reserve 1 additional byte for the i2c address byte */
 
+void is31fl3738_update(void) {
+	int res = I2C_WRITE(SLAVE_ADDR, (char*)pwm_cache, sizeof(pwm_cache));   /* send 1 additional byte (address) */
+//	if(res != MICROBIT_OK)
+//		uBit.serial.printf("i2c %d\n",res);
+}
+
+void is31fl3738_setPixel(int16_t x , int16_t y, uint8_t value) {
+	uint8_t idx = y*32 + x*2 + 1; /* use offset +1 to have some space for the address byte during i2c write */
+
+	if((x>4)||(y>4))
+		return;
+
+	pwm_cache[idx++] = value;
+	pwm_cache[idx++] = value;
+	idx+=14;
+	pwm_cache[idx++] = value;
+	pwm_cache[idx]   = value;
+}
+
 int is31fl3738_init(void) {
 	const uint8_t *init;
 	char tmp;
@@ -82,26 +101,17 @@ int is31fl3738_init(void) {
 			return res;
 	}
 
-	memset(pwm_cache, 0, sizeof(pwm_cache));
+	pwm_cache[0] = 0; /* set address byte */
+
+	/* do a test-blink */
+	memset(pwm_cache+1, 0xff, sizeof(pwm_cache)-1);
+	is31fl3738_update();
+	
+	uBit.sleep(100);
+	
+	/* clear all LEDs again */
+	memset(pwm_cache+1, 0, sizeof(pwm_cache)-1);
+	is31fl3738_update();
 
 	return MICROBIT_OK;
-}
-
-void is31fl3738_update(void) {
-	int res = I2C_WRITE(SLAVE_ADDR, (char*)pwm_cache, sizeof(pwm_cache));   /* send 1 additional byte (address) */
-//	if(res != MICROBIT_OK)
-//		uBit.serial.printf("i2c %d\n",res);
-}
-
-void is31fl3738_setPixel(int16_t x , int16_t y, uint8_t value) {
-	uint8_t idx = y*32 + x*2 + 1; /* use offset +1 to have some space for the address byte during i2c write */
-
-	if((x>4)||(y>4))
-		return;
-
-	pwm_cache[idx++] = value;
-	pwm_cache[idx++] = value;
-	idx+=14;
-	pwm_cache[idx++] = value;
-	pwm_cache[idx]   = value;
 }
