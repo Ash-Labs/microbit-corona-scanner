@@ -89,8 +89,8 @@ int is31fl3738_init(void) {
 
 void is31fl3738_update(void) {
 	int res = I2C_WRITE(SLAVE_ADDR, (char*)pwm_cache, sizeof(pwm_cache));   /* send 1 additional byte (address) */
-	if(res != MICROBIT_OK)
-		uBit.serial.printf("i2c %d\n",res);
+//	if(res != MICROBIT_OK)
+//		uBit.serial.printf("i2c %d\n",res);
 }
 
 void is31fl3738_setPixel(int16_t x , int16_t y, uint8_t value, uint8_t draw_now) {

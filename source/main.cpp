@@ -403,6 +403,20 @@ static void randomize_age(void) {
 	}
 }
 
+static uint32_t wait_until(uint32_t end) {
+	uint32_t ts1 = uBit.systemTime(), ts2;
+	if(ts1 >= end)
+		return ts1;
+	uBit.sleep(end-ts1);
+	ts2 = uBit.systemTime();
+	/*
+	char buf[32];
+	sprintf(buf,"wait %ld\r\n",end-ts1);
+	uBit.serial.send(buf,ASYNC);
+	*/
+	return ts2;
+}
+
 /* TODO:
  * 
  * - serial: support serial commands? (e.g. RPI-to-UART en/disable?)
@@ -413,7 +427,7 @@ static void randomize_age(void) {
  */
 int main() {
 	uint32_t now = uBit.systemTime();
-	uint32_t last_cntprint = now;	
+	uint32_t last_cntprint = now;
 	uint8_t rpis_active, apple_rpis_active, clicks_done = 0, sleep_time = 20;
 
 	uBit.serial.setTxBufferSize(128);
@@ -455,12 +469,10 @@ int main() {
 	click_request++;
 
     while (true) {
+		now = wait_until(now + sleep_time);
 		
-		uBit.sleep(sleep_time);
-				
-		now = uBit.systemTime();
 		rpis_active = refresh_screen(now, &apple_rpis_active);
-		
+
 		/* output rpi counter every 10 seconds */
 		if(((now - last_cntprint) >= 10000) && (uBit.serial.txBufferedSize() <= 16)) {
 			char buf[128];
