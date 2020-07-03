@@ -131,10 +131,10 @@ static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 	return GAMMA_CORRECT(val);
 }
 
-static void set_pixel(int16_t x , int16_t y, uint8_t value, uint8_t draw_now) {
+static void set_pixel(int16_t x , int16_t y, uint8_t value) {
 	uBit.display.image.setPixelValue(x,y,value);
 	if(config & CF_EXTLEDS_EN)
-		is31fl3738_setPixel(x,y,value,draw_now);
+		is31fl3738_setPixel(x,y,value);
 }
 
 static void update_display(void) {
@@ -161,7 +161,7 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 
 			rpi->age++;
 
-			set_pixel(x,y,calc_brightness(rpi, now),0);
+			set_pixel(x,y,calc_brightness(rpi, now));
 
 			/* find RPI with highest RSSI */
 			rssi = RPI_RSSI(rpi);
@@ -229,7 +229,7 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, u
 
 	y = idx/5;
 	x = idx%5;
-	set_pixel(x,y,calc_brightness(rpi, uBit.systemTime()),1);
+	set_pixel(x,y,calc_brightness(rpi, uBit.systemTime()));
 
 	return idx == strongest_rpi;
 }

@@ -93,7 +93,7 @@ void is31fl3738_update(void) {
 //		uBit.serial.printf("i2c %d\n",res);
 }
 
-void is31fl3738_setPixel(int16_t x , int16_t y, uint8_t value, uint8_t draw_now) {
+void is31fl3738_setPixel(int16_t x , int16_t y, uint8_t value) {
 	uint8_t idx = y*32 + x*2 + 1; /* use offset +1 to have some space for the address byte during i2c write */
 
 	if((x>4)||(y>4))
