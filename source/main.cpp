@@ -76,6 +76,8 @@ struct rpi_s {
 	uint8_t newer;
 };
 
+#define APPLE_FLAGS                 0x1A
+
 #define RPI_DEVICE_APPLE(a)         ((a)->devtype_rssi>>7)
 #define RPI_RSSI(a)                 ((a)->devtype_rssi|0x80)
 
@@ -185,7 +187,7 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 	return rpis;
 }
 
-static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, uint8_t flags_present) {
+static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, int adv_flags) {
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
 	uint8_t likely_apple;
@@ -197,7 +199,7 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, u
 	/* allocate rpi if not seen yet */
 	if(idx == RPI_N) {
 		rpis_seen++;
-		apple_rpis_seen += ((RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE) && flags_present);
+		apple_rpis_seen += ((RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE) && (adv_flags == APPLE_FLAGS));
 		/* reuse oldest rpi slot */
 		idx = oldest_rpi;
 		rpi = rpi_list + idx;
@@ -224,7 +226,7 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, u
 	if(!peer_addr)
 		return 0;
 
-	likely_apple = (RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE) && flags_present;
+	likely_apple = (RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE) && (adv_flags == APPLE_FLAGS);
 	rssi = MIN(rssi, -1); /* clamp to -1 (negative numbers only) */
 	rpi->devtype_rssi = (likely_apple<<7)|(rssi&0x7f);
 
@@ -251,7 +253,7 @@ static char *tohex(char *dst, const uint8_t *src, uint32_t n) {
 	return dst;
 }
 
-static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer_addr, uint8_t flags_present, uint8_t is_strongest) {
+static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer_addr, int adv_flags, uint8_t is_strongest) {
 	char buf[64], *p=buf;
 	/*
 	char buf[80], *p=buf;
@@ -261,9 +263,21 @@ static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, const uint8_t 
 	*/
 	p=tohex(p, rpi_aem, 16);
 	*p=' ';
+	
 	p=tohex(p+1, rpi_aem+16, 4);
 	*p=' ';
-	sprintf(p+1, "%c%c%c %03d\r\n", '0'+RAND_BDADDR_TYPE(peer_addr), flags_present ? 'F' : ' ', is_strongest ? '!' : ' ', rssi);
+	
+	p[1]='0'+RAND_BDADDR_TYPE(peer_addr);
+	
+	if(adv_flags >= 0) {
+		p[2]=nibble2hex(adv_flags>>4);
+		p[3]=nibble2hex(adv_flags&0xf);
+	}
+	else
+		p[2]=p[3]='-';
+	
+	p[4]=' ';
+	sprintf(p+5, "%03d%c\r\n", rssi, is_strongest ? '!' : ' ');
 	uBit.serial.send(buf, ASYNC);
 }
 
@@ -278,14 +292,14 @@ static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, const uint8_t 
  * ~5m  distance + wall: -98
  * ~8m distance + 2x wall: -98
  */
-static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer_addr, uint8_t flags_present) {
+static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer_addr, int adv_flags) {
 	uint16_t short_rpi = (rpi_aem[0]<<8)|rpi_aem[1];
-	uint8_t is_strongest = seen(short_rpi, rssi, peer_addr, flags_present);
+	uint8_t is_strongest = seen(short_rpi, rssi, peer_addr, adv_flags);
 	
 	click_request += (is_strongest ^ 1);
 	
 	if((config & CF_UART_EN) && (uBit.serial.txBufferedSize() <= 64)) /* prevent garbled lines */
-		exposure_to_uart(rpi_aem, rssi, peer_addr, flags_present, is_strongest);
+		exposure_to_uart(rpi_aem, rssi, peer_addr, adv_flags, is_strongest);
 }
 
 /* see https://os.mbed.com/docs/mbed-os/v5.15/mbed-os-api-doxy/struct_gap_1_1_advertisement_callback_params__t.html */
@@ -293,7 +307,7 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
     uint8_t len = params->advertisingDataLen;
 	const uint8_t *p = params->advertisingData;
 	const int8_t rssi = params->rssi; /* use for LED brightness */
-	uint8_t flags_present = 0;
+	int adv_flags = -1;
 	
 	/* match Exposure Notification Service Class UUID 0xFD6F 
 	 * 
@@ -304,15 +318,14 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	 * 17 16 6ffd 660a6af67f7e946b3c3ce253dae9b411 78b0e9c2 (rpi, aem)
 	 * */
 	
-	/* 02 01 1a only sent by iOS !??? */
-	if((len == 31) && (p[0] == 2) && (p[1] == 1) && (p[2] == 0x1a)) {
+	if((len >= 31) && (p[0] == 2) && (p[1] == 1)) {
+		adv_flags = p[2];
 		p+=3;
 		len-=3;
-		flags_present = 1;
 	}
 	
-	if((len == 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd))
-		exposure_rx(p+8, rssi, params->peerAddr, flags_present);
+	if((len >= 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd))
+		exposure_rx(p+8, rssi, params->peerAddr, adv_flags);
 }
 
 static void audible_click(void) {
