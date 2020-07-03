@@ -60,8 +60,6 @@ static int is31fl3738_cmd(uint8_t cmd) {
 #define PWM_REGS	(CS_N*2*SW_N*2)
 
 static uint8_t pwm_cache[PWM_REGS+1];     /* reserve 1 additional byte for the i2c address byte */
-static uint8_t pwm_update_start = UINT8_MAX;
-static uint8_t pwm_update_end   = 0;
 
 int is31fl3738_init(void) {
 	const uint8_t *init;
@@ -85,39 +83,14 @@ int is31fl3738_init(void) {
 	}
 
 	memset(pwm_cache, 0, sizeof(pwm_cache));
-    pwm_update_start = UINT8_MAX;
-    pwm_update_end   = 0;
 
 	return MICROBIT_OK;
 }
 
 void is31fl3738_update(void) {
-	int len;
-	
-	pwm_update_start = 1;
-	pwm_update_end = 160;
-	
-	len = pwm_update_end - pwm_update_start + 1;
-	
-	if(len >= 1) {
-		uint8_t *p = pwm_cache + pwm_update_start - 1;
-		uint8_t bak = *p, tries;
-		int res = -1;
-		
-		*p = pwm_update_start - 1;                          /* store address byte */
-		for(tries = 1;(tries) && (res != MICROBIT_OK);tries--) {
-			res = I2C_WRITE(SLAVE_ADDR, (char*)p, len+1);   /* send 1 additional byte (address) */
-		}
-		*p = bak;                                           /* restore original value of address byte */
-		
-		//if(!tries)
-			//uBit.serial.printf("retry: %d\n",res);
-		
-		//uBit.serial.printf("write %02x %02x len %d\n",pwm_update_start,pwm_update_end,len);
-	
-		pwm_update_start = UINT8_MAX;
-		pwm_update_end   = 0;
-	}
+	int res = I2C_WRITE(SLAVE_ADDR, (char*)pwm_cache, sizeof(pwm_cache));   /* send 1 additional byte (address) */
+	if(res != MICROBIT_OK)
+		uBit.serial.printf("i2c %d\n",res);
 }
 
 void is31fl3738_setPixel(int16_t x , int16_t y, uint8_t value, uint8_t draw_now) {
@@ -126,16 +99,9 @@ void is31fl3738_setPixel(int16_t x , int16_t y, uint8_t value, uint8_t draw_now)
 	if((x>4)||(y>4))
 		return;
 
-//	pwm_update_start = MIN(pwm_update_start, idx);
-
 	pwm_cache[idx++] = value;
 	pwm_cache[idx++] = value;
 	idx+=14;
 	pwm_cache[idx++] = value;
 	pwm_cache[idx]   = value;
-
-//	pwm_update_end   = MAX(pwm_update_end,   idx);
-
-	//if(draw_now)
-		//is31fl3738_update();
 }
