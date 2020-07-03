@@ -3,53 +3,65 @@
 
 #include "is31fl3738.h"
 
+#define MIN(a,b) (((a) < (b)) ? (a) : (b))
+#define MAX(a,b) (((a) > (b)) ? (a) : (b))
+
+//#define I2C_DEBUG
+
+extern MicroBit uBit;
+
+#ifdef I2C_DEBUG
+#define I2C_WRITE i2c_write_debug
+static int i2c_write_debug(uint8_t addr, const char* buf, int n) {
+	int i;
+	uBit.serial.printf("write %d: ",n);
+	for(i=0;i<n;i++)
+		uBit.serial.printf("%02x ",buf[i]);
+	i = uBit.i2c.write(addr, buf, n);
+	uBit.serial.printf("res %d\r\n",i);
+	return i;
+}
+#else
+#define I2C_WRITE uBit.i2c.write
+#endif
+
 #define CMD(c)         ((c)|0x80)
 #define DATA(n)        (n)
 #define INIT_END       0
 
-#define MIN(a,b) (((a) < (b)) ? (a) : (b))
-#define MAX(a,b) (((a) > (b)) ? (a) : (b))
-
 static const uint8_t init_data[] __attribute__ ((aligned (4))) = {
-	CMD(IS31FL3738_CMD_LEDCTL), DATA(4), 0x00, 0x03, 0x00, 0x03,      /* turn LED 1A on */
-	//CMD(IS31FL3738_CMD_LEDCTL), DATA(21), 0x00,                      /* turn 5x5 LEDs on */
-    //    0xff, 0x03, 0xff, 0x03,  /* SW1 */
-    //    0xff, 0x03, 0xff, 0x03,  /* SW2 */ 
-    //    0xff, 0x03, 0xff, 0x03,  /* SW3 */
-    //    0xff, 0x03, 0xff, 0x03,  /* SW4 */
-    //    0xff, 0x03, 0xff, 0x03,  /* SW5 */
-	CMD(IS31FL3738_CMD_FUNC),   DATA(3), 0x00, 0x01, 0xff,            /* normal operation, set GCRR to 255 */
+	//CMD(IS31FL3738_CMD_LEDCTL), DATA(4), 0x00, 0x03, 0x00, 0x03,      /* turn LED 1A on */
+	CMD(IS31FL3738_CMD_LEDCTL), DATA(21), 0x00,                      /* turn 5x5 LEDs on */
+        0xff, 0x03, 0xff, 0x03,  /* SW1 */
+        0xff, 0x03, 0xff, 0x03,  /* SW2 */ 
+        0xff, 0x03, 0xff, 0x03,  /* SW3 */
+        0xff, 0x03, 0xff, 0x03,  /* SW4 */
+        0xff, 0x03, 0xff, 0x03,  /* SW5 */
+	CMD(IS31FL3738_CMD_FUNC),   DATA(3), 0x00, 0x01, 0x80,            /* normal operation, set GCRR to 128 */
 	CMD(IS31FL3738_CMD_PWM),                                          /* switch to PWM page access */
-	DATA(3), 0x00, 0x40, 0x40, /* PWM test data */
+	//DATA(3), 0x00, 0x40, 0x40, /* PWM test data */
 	INIT_END
 };
 
-extern MicroBit uBit;
-
 #define SLAVE_ADDR	(0x50<<1)
-
-static int i2c_write(uint8_t addr, const char* buf, int n) {
-	int i;
-#ifdef I2C_DEBUG
-	for(i=0;i<n;i++)
-		uBit.serial.printf("%02x ",buf[i]);
-#endif
-	i = uBit.i2c.write(addr, buf, n);
-#ifdef I2C_DEBUG
-	uBit.serial.printf("%d\r\n",i);
-#endif
-	return i;
-}
 
 static int is31fl3738_cmd(uint8_t cmd) {
 	uint8_t buf[2] = {IS31FL3738_REG_WRLOCK, IS31FL3738_WRLOCK_MAGIC};
-	int res = i2c_write(SLAVE_ADDR, (char*)buf, 2);
+	int res = I2C_WRITE(SLAVE_ADDR, (char*)buf, 2);
 	if(res != MICROBIT_OK)
 		return res;
 	buf[0] = IS31FL3738_REG_CMD;
 	buf[1] = cmd;
-	return i2c_write(SLAVE_ADDR, (char*)buf, 2);
+	return I2C_WRITE(SLAVE_ADDR, (char*)buf, 2);
 }
+
+#define CS_N        8
+#define SW_N        5
+#define PWM_REGS	(CS_N*2*SW_N*2)
+
+static uint8_t pwm_cache[PWM_REGS+1];     /* reserve 1 additional byte for the i2c address byte */
+static uint8_t pwm_update_start = UINT8_MAX;
+static uint8_t pwm_update_end   = 0;
 
 int is31fl3738_init(void) {
 	const uint8_t *init;
@@ -65,36 +77,65 @@ int is31fl3738_init(void) {
 		if(v&0x80)
 			res = is31fl3738_cmd(v&0x7f);
 		else {
-			res = i2c_write(SLAVE_ADDR, (const char *)init+1, v);
+			res = I2C_WRITE(SLAVE_ADDR, (const char *)init+1, v);
 			init+=v;
 		}
 		if(res != MICROBIT_OK)
 			return res;
 	}
 
+	memset(pwm_cache, 0, sizeof(pwm_cache));
+    pwm_update_start = UINT8_MAX;
+    pwm_update_end   = 0;
+
 	return MICROBIT_OK;
 }
 
-static uint8_t led_cache[25];
-static uint8_t led_update_start = UINT8_MAX;
-static uint8_t led_update_end   = 0;
-
 void is31fl3738_update(void) {
+	int len;
 	
-	/* TODO */
+	pwm_update_start = 1;
+	pwm_update_end = 160;
 	
-	led_update_start = UINT8_MAX;
-	led_update_end   = 0;
+	len = pwm_update_end - pwm_update_start + 1;
+	
+	if(len >= 1) {
+		uint8_t *p = pwm_cache + pwm_update_start - 1;
+		uint8_t bak = *p, tries;
+		int res = -1;
+		
+		*p = pwm_update_start - 1;                          /* store address byte */
+		for(tries = 1;(tries) && (res != MICROBIT_OK);tries--) {
+			res = I2C_WRITE(SLAVE_ADDR, (char*)p, len+1);   /* send 1 additional byte (address) */
+		}
+		*p = bak;                                           /* restore original value of address byte */
+		
+		//if(!tries)
+			//uBit.serial.printf("retry: %d\n",res);
+		
+		//uBit.serial.printf("write %02x %02x len %d\n",pwm_update_start,pwm_update_end,len);
+	
+		pwm_update_start = UINT8_MAX;
+		pwm_update_end   = 0;
+	}
 }
 
 void is31fl3738_setPixel(int16_t x , int16_t y, uint8_t value, uint8_t draw_now) {
-	uint8_t idx = x*5+y;
-	
-	led_cache[idx] = value;
-	
-	led_update_start = MIN(led_update_start, idx);
-	led_update_end   = MAX(led_update_end,   idx);
-	
-	if(draw_now)
-		is31fl3738_update();
+	uint8_t idx = y*32 + x*2 + 1; /* use offset +1 to have some space for the address byte during i2c write */
+
+	if((x>4)||(y>4))
+		return;
+
+//	pwm_update_start = MIN(pwm_update_start, idx);
+
+	pwm_cache[idx++] = value;
+	pwm_cache[idx++] = value;
+	idx+=14;
+	pwm_cache[idx++] = value;
+	pwm_cache[idx]   = value;
+
+//	pwm_update_end   = MAX(pwm_update_end,   idx);
+
+	//if(draw_now)
+		//is31fl3738_update();
 }

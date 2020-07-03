@@ -148,8 +148,8 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 	int8_t rssi, best_rssi = INT8_MIN;
 	uint16_t x,y;
 	
-	for(x=0;x<5;x++) {
-		for(y=0;y<5;y++,rpi++) {
+	for(y=0;y<5;y++) {
+		for(x=0;x<5;x++,rpi++) {
 			
 			/* ignore dead RPIs */
 			if(rpi->age > RPI_AGE_TIMEOUT)
@@ -227,8 +227,8 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, u
 
 	rpi->age = 0;
 
-	x = idx/5;
-	y = idx%5;
+	y = idx/5;
+	x = idx%5;
 	set_pixel(x,y,calc_brightness(rpi, uBit.systemTime()),1);
 
 	return idx == strongest_rpi;
