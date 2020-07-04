@@ -198,6 +198,10 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, i
 	
 	/* allocate rpi if not seen yet */
 	if(idx == RPI_N) {
+		/* TODO: handle case when all RPI slots are (i.e. the oldest one is) in use:
+		 * - don't increment seen counter?
+		 * - drop seen event (don't overwrite oldest RPI?)
+		 */
 		rpis_seen++;
 		apple_rpis_seen += ((RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE) && (adv_flags == APPLE_FLAGS));
 		/* reuse oldest rpi slot */
