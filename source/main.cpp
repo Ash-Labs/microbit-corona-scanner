@@ -39,7 +39,7 @@ enum {
 MicroBit uBit;
 
 static uint32_t rpis_seen           = 0; /* includes apple */
-static uint32_t apple_rpis_seen     = 0;
+static uint32_t non_apple_rpis_seen = 0;
 
 static uint8_t click_request        = 0;
 static uint8_t strongest_rpi        = UINT8_MAX;
@@ -53,8 +53,8 @@ static uint8_t strongest_rpi        = UINT8_MAX;
 #define REFRESH_DELAY               (1000/REFRESH_HZ)
 
 #define RPI_AGE_TIMEOUT				(50*2)				/* 50 equals 1 second */
-static uint8_t age_fadeout_apple    = RPI_AGE_TIMEOUT;
-static uint8_t age_fadeout_other    = RPI_AGE_TIMEOUT;
+static uint8_t age_fadeout           = RPI_AGE_TIMEOUT;
+static uint8_t age_fadeout_non_apple = RPI_AGE_TIMEOUT;
 
 /* config bits */
 #define CF_UART_EN					(1<<0)	/* enable USB serial RPI output */
@@ -78,7 +78,7 @@ struct rpi_s {
 
 #define APPLE_FLAGS                 0x1A
 
-#define RPI_DEVICE_APPLE(a)         ((a)->devtype_rssi>>7)
+#define RPI_DEVICE_NON_APPLE(a)     ((a)->devtype_rssi>>7)
 #define RPI_RSSI(a)                 ((a)->devtype_rssi|0x80)
 
 #define RPI_N                       25
@@ -112,16 +112,16 @@ static uint8_t scale_rssi(int8_t rssi) {
 
 /* smoothly fade out aged RPIs :) */
 static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
-	uint8_t age_fadeout = RPI_DEVICE_APPLE(rpi) ? age_fadeout_apple : age_fadeout_other;
+	uint8_t fadeout = RPI_DEVICE_NON_APPLE(rpi) ? age_fadeout_non_apple : age_fadeout;
 	uint8_t val, age = rpi->age;
 
-	if(age >= age_fadeout)
+	if(age >= fadeout)
 		return 0;
 
 	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(RPI_RSSI(rpi)) : UINT8_MAX;
 
-	/* add 2Hz on/off blinking for resolvable devices if persistence mode and non-/resolvable visualisation enabled */
-	if((config & CF_PERSISTENCE_EN) && (config & CF_DEVTYPE_VISUALIZE) && (!RPI_DEVICE_APPLE(rpi))) {
+	/* add 2Hz on/off blinking for non-apple devices if persistence mode and non-apple visualisation enabled */
+	if((config & CF_PERSISTENCE_EN) && (config & CF_DEVTYPE_VISUALIZE) && (RPI_DEVICE_NON_APPLE(rpi))) {
 		uint32_t fraction = now&511;
 		if(fraction > 255)
 			return 0;
@@ -147,9 +147,9 @@ static void update_display(void) {
 		is31fl3738_update();
 }
 
-static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
+static uint8_t refresh_screen(unsigned long now, uint8_t *non_apple_rpis_active) {
 	struct rpi_s *rpi = rpi_list;
-	uint8_t apple_rpis = 0, rpis = 0, _strongest_rpi = UINT8_MAX;
+	uint8_t non_apple_rpis = 0, rpis = 0, _strongest_rpi = UINT8_MAX;
 	int8_t rssi, best_rssi = INT8_MIN;
 	uint16_t x,y;
 	
@@ -162,7 +162,7 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 
 			/* update active RPIs counter */
 			rpis++;
-			apple_rpis += RPI_DEVICE_APPLE(rpi);
+			non_apple_rpis += RPI_DEVICE_NON_APPLE(rpi);
 
 			rpi->age++;
 
@@ -181,16 +181,15 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *apple_rpis_active) {
 
 	strongest_rpi = _strongest_rpi;
 
-	if(apple_rpis_active)
-		*apple_rpis_active = apple_rpis;
+	if(non_apple_rpis_active)
+		*non_apple_rpis_active = non_apple_rpis;
 
 	return rpis;
 }
 
-static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, int adv_flags) {
+static uint8_t seen(uint16_t short_rpi, int8_t rssi, uint8_t non_apple) {
 	struct rpi_s *rpi = rpi_list;
 	uint16_t x,y;
-	uint8_t likely_apple;
 	int idx;
 	
 	/* try to find rpi in list */
@@ -203,7 +202,7 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, i
 		 * - drop seen event (don't overwrite oldest RPI?)
 		 */
 		rpis_seen++;
-		apple_rpis_seen += ((RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE) && (adv_flags == APPLE_FLAGS));
+		non_apple_rpis_seen += non_apple;
 		/* reuse oldest rpi slot */
 		idx = oldest_rpi;
 		rpi = rpi_list + idx;
@@ -227,12 +226,11 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, const uint8_t *peer_addr, i
 		newest_rpi = idx;
 	}
 
-	if(!peer_addr)
+	if(rssi == INT8_MIN)
 		return 0;
 
-	likely_apple = (RAND_BDADDR_TYPE(peer_addr) == RAND_BDADDR_NONRESOLVABLE) && (adv_flags == APPLE_FLAGS);
 	rssi = MIN(rssi, -1); /* clamp to -1 (negative numbers only) */
-	rpi->devtype_rssi = (likely_apple<<7)|(rssi&0x7f);
+	rpi->devtype_rssi = (non_apple<<7)|(rssi&0x7f);
 
 	rpi->age = 0;
 
@@ -298,7 +296,8 @@ static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, const uint8_t 
  */
 static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer_addr, int adv_flags) {
 	uint16_t short_rpi = (rpi_aem[0]<<8)|rpi_aem[1];
-	uint8_t is_strongest = seen(short_rpi, rssi, peer_addr, adv_flags);
+	uint8_t non_apple = (RAND_BDADDR_TYPE(peer_addr) != RAND_BDADDR_NONRESOLVABLE) || (adv_flags != APPLE_FLAGS);
+	uint8_t is_strongest = seen(short_rpi, rssi, non_apple);
 	
 	click_request += (is_strongest ^ 1);
 	
@@ -357,10 +356,10 @@ static void mode_change(uint8_t inc) {
 		config &= ~CF_FADEOUT_EN;
 	
 	/* short blinks vs. inactive after 2 seconds */
-	age_fadeout_apple = age_fadeout_other = (mode&1) ? 5 : RPI_AGE_TIMEOUT;
+	age_fadeout_non_apple = age_fadeout = (mode&1) ? 5 : RPI_AGE_TIMEOUT;
 	if(config & CF_DEVTYPE_VISUALIZE) {
-		age_fadeout_apple = (mode&1) ? 7 : RPI_AGE_TIMEOUT; /* make Apple blinks longer */
-		age_fadeout_other = (mode&1) ? 2 : RPI_AGE_TIMEOUT; /* make other blinks shorter */
+		age_fadeout_non_apple = (mode&1) ? 2 : RPI_AGE_TIMEOUT; /* make non-Apple blinks shorter */
+		age_fadeout = (mode&1) ? 7 : RPI_AGE_TIMEOUT; /* make other blinks longer */
 	}
 	
 	/* persistence flag */
@@ -388,7 +387,7 @@ static void mode_change(uint8_t inc) {
  * A long click  : enable RPI output via USB serial
  * 
  * B short click : change visualisation mode
- * B long click  : Apple/Other device type visualisation on/off
+ * B long click  : non-Apple device type visualisation on/off
  * 
  */
 void onLongClick(MicroBitEvent e) {
@@ -418,7 +417,7 @@ static void randomize_age(void) {
 		uint32_t v = uBit.random(RPI_N);
 		if(set&(1<<v)) {
 			set &= ~(1<<v);
-			seen(v, INT8_MIN, NULL, 0); /* short_rpis must be preinitialized to 0..RPI_N or read from NULL ptr will be triggered! */
+			seen(v, INT8_MIN, 0); /* short_rpis must be preinitialized to 0..RPI_N or read from NULL ptr will be triggered! */
 		}
 	}
 }
@@ -439,7 +438,6 @@ static uint32_t wait_until(uint32_t end) {
 
 /* TODO:
  * 
- * - rename Apple/Google distinction
  * - handle case with >= 25 RPIs in range
  * - better parser for advertisement data
  * - add unfiltered serial raw output mode if B pressed during reset
@@ -455,7 +453,7 @@ static uint32_t wait_until(uint32_t end) {
 int main() {
 	uint32_t now = uBit.systemTime();
 	uint32_t last_cntprint = now;
-	uint8_t rpis_active, apple_rpis_active, clicks_done = 0, sleep_time = REFRESH_DELAY;
+	uint8_t rpis_active, non_apple_rpis_active, clicks_done = 0, sleep_time = REFRESH_DELAY;
 
 	uBit.serial.setTxBufferSize(128);
 
@@ -498,15 +496,15 @@ int main() {
     while (true) {
 		now = wait_until(now + sleep_time);
 		
-		rpis_active = refresh_screen(now, &apple_rpis_active);
+		rpis_active = refresh_screen(now, &non_apple_rpis_active);
 
 		/* output rpi counter every 10 seconds */
 		if(((now - last_cntprint) >= 10000) && (uBit.serial.txBufferedSize() <= 16)) {
-			char buf[128];
+			char buf[96];
 			last_cntprint = now;
-			sprintf(buf,"RPIs active: %2d (Apple: %2d, Google: %2d) seen: %ld (Apple: %ld, Google: %ld)\r\n",
-				rpis_active, apple_rpis_active, rpis_active - apple_rpis_active,
-				rpis_seen,   apple_rpis_seen,   rpis_seen   - apple_rpis_seen);
+			sprintf(buf,"RPIs active: %s%2d (non-Apple: >=%2d) seen: %ld (non-Apple: >=%ld)\r\n",
+				rpis_active < RPI_N ? "  " : ">=",  rpis_active, non_apple_rpis_active, 
+				rpis_seen, non_apple_rpis_seen);
 			uBit.serial.send(buf, ASYNC);
 		}
 		
