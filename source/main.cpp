@@ -439,6 +439,12 @@ static uint32_t wait_until(uint32_t end) {
 
 /* TODO:
  * 
+ * - rename Apple/Google distinction
+ * - handle case with >= 25 RPIs in range
+ * - better parser for advertisement data
+ * - add unfiltered serial raw output mode if B pressed during reset
+ * - handle uBit.systemTime() overflow
+ * 
  * - serial: support serial commands? (e.g. RPI-to-UART en/disable?)
  * - audio: mute clicks from oldest RPI or RPI with highest seen counter instead of highest RSSI?
  * - visual: map age/seen counter to LED position?
