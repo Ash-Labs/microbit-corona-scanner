@@ -79,6 +79,9 @@ struct rpi_s {
 	uint8_t newer;
 };
 
+#define UART_TXBUFSZ                128
+#define UART_CANQUEUE(a)            ((UART_TXBUFSZ - uBit.serial.txBufferedSize()) >= (a))
+
 #define APPLE_FLAGS                 0x1A
 
 #define RPI_DEVICE_NON_APPLE(a)     ((a)->devtype_rssi>>7)
@@ -266,7 +269,7 @@ static char *tohex(char *dst, const uint8_t *src, uint32_t n) {
 }
 
 static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer_addr, int adv_flags, uint8_t is_strongest) {
-	char buf[64], *p=buf;
+	char buf[60], *p=buf;
 	/*
 	char buf[80], *p=buf;
 	p=tohex(buf, peer_addr, 6);
@@ -311,7 +314,7 @@ static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer
 	
 	click_request += (is_strongest ^ 1);
 	
-	if((config & CF_UART_EN) && (uBit.serial.txBufferedSize() <= 64)) /* prevent garbled lines */
+	if((config & CF_UART_EN) && (UART_CANQUEUE(60))) /* prevent garbled lines */
 		exposure_to_uart(rpi_aem, rssi, peer_addr, adv_flags, is_strongest);
 }
 
@@ -464,7 +467,7 @@ int main() {
 	uint32_t last_cntprint = now;
 	uint8_t rpis_active, non_apple_rpis_active, clicks_done = 0, sleep_time = REFRESH_DELAY;
 
-	uBit.serial.setTxBufferSize(128);
+	uBit.serial.setTxBufferSize(UART_TXBUFSZ);
 
 	rpi_list_init();
 	
@@ -514,8 +517,8 @@ int main() {
 			thrashing_likely--;
 
 		/* output rpi counter every 10 seconds */
-		if(((now - last_cntprint) >= 10000) && (uBit.serial.txBufferedSize() <= 16)) {
-			char buf[96];
+		if(((now - last_cntprint) >= 10000) && (UART_CANQUEUE(84))) {
+			char buf[84];
 			last_cntprint = now;
 			sprintf(buf,"RPIs active: %s%2d (non-Apple: >=%2d) seen: %ld (non-Apple: >=%ld)\r\n",
 				rpis_active < RPI_N ? "  " : ">=",  rpis_active, non_apple_rpis_active, 
