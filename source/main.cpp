@@ -215,9 +215,14 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, uint8_t non_apple) {
 		idx = oldest_rpi;
 		rpi = rpi_list + idx;
 
-		/* thrashing protection: only reclaim oldest entry if RPI no longer active */
+		/* thrashing prevention: only reclaim oldest entry if RPI no longer active
+		 * However, without this blinking is more 'agitated' in situations with lots of RPIs.
+		 * I think this is a more suitable visualisation for these cases.
+		 * Therefore this thrashing prevention is disabled for now. */
+		/*
 		if(rpi->age <= RPI_AGE_TIMEOUT)
 			return 0;
+		*/
 
 		/* claim & reassign RPI entry */
 		rpi->short_rpi = short_rpi;
