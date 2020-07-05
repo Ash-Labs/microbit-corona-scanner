@@ -17,7 +17,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.6-dev4"
+#define VERSION_STRING	"v0.6-dev5"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -60,14 +60,21 @@ static uint8_t age_fadeout_non_apple = RPI_AGE_TIMEOUT;
 static uint8_t thrashing_likely      = 0;
 
 /* config bits */
-#define CF_UART_EN					(1<<0)	/* enable USB serial RPI output */
-#define CF_RSSI_BRIGHTNESS			(1<<1)	/* use RSSI for LED brightness 	*/
-#define CF_PERSISTENCE_EN			(1<<2)	/* persistence visualisation 	*/
-#define CF_FADEOUT_EN				(1<<3)	/* fadeout LEDs over time 		*/
-#define CF_DEVTYPE_VISUALIZE		(1<<4)	/* device type visualisation 	*/
-#define CF_CLICK_EN					(1<<5)	/* Audio clicks enable 			*/
-#define CF_EXTLEDS_EN				(1<<6)	/* use external LEDs			*/
-static uint8_t config				= 0;
+#define CF_UART_EN					(1<<0)	 /* enable USB serial RPI output */
+#define CF_UART_RAW_EN				(1<<1)   /* enable unfiltered beacon output */
+
+#define CF_RSSI_BRIGHTNESS			(1<<2)	 /* use RSSI for LED brightness 	*/
+#define CF_PERSISTENCE_EN			(1<<3)	 /* persistence visualisation 	*/
+#define CF_FADEOUT_EN				(1<<4)	 /* fadeout LEDs over time 		*/
+#define CF_DEVTYPE_VISUALIZE		(1<<5)	 /* device type visualisation 	*/
+#define CF_EXTLEDS_EN				(1<<6)	 /* use external LEDs			*/
+
+#define CF_CLICK_EN					(1<<8)	 /* Audio clicks enable 			*/
+#define CF_CALLIOPE_SPKR_EN         (1<<9)   /* Calliope mini speaker enable */
+
+#define CF_HW_CALLIOPE				(1<<10); /* Calliope mini hw detected   */
+
+static uint16_t config				= 0;
 
 struct rpi_s {
 	uint16_t short_rpi;
@@ -268,29 +275,41 @@ static char *tohex(char *dst, const uint8_t *src, uint32_t n) {
 	return dst;
 }
 
+static void raw_to_uart(const uint8_t *d, uint8_t len, const uint8_t *paddr, int8_t rssi) {
+	char buf[128], *p;
+
+	if((len>(sizeof(buf)-21)) || (!UART_CANQUEUE(len*2+21)))
+		return;
+
+	p=tohex(buf, paddr, 6);
+	*p=' ';
+	p=tohex(p+1, d, len);
+	*p=' ';
+	sprintf(p+1, "%03d\r\n", rssi);
+	uBit.serial.send(buf, ASYNC);
+}
+
 static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer_addr, int adv_flags, uint8_t is_strongest) {
 	char buf[60], *p=buf;
-	/*
-	char buf[80], *p=buf;
-	p=tohex(buf, peer_addr, 6);
-	p=' ';
-	p++;
-	*/
+
+	if(!UART_CANQUEUE(sizeof(buf))) /* prevent garbled lines */
+		return;
+
 	p=tohex(p, rpi_aem, 16);
 	*p=' ';
-	
+
 	p=tohex(p+1, rpi_aem+16, 4);
 	*p=' ';
-	
+
 	p[1]='0'+RAND_BDADDR_TYPE(peer_addr);
-	
+
 	if(adv_flags >= 0) {
 		p[2]=nibble2hex(adv_flags>>4);
 		p[3]=nibble2hex(adv_flags&0xf);
 	}
 	else
 		p[2]=p[3]='-';
-	
+
 	p[4]=' ';
 	sprintf(p+5, "%03d%c\r\n", rssi, is_strongest ? '!' : ' ');
 	uBit.serial.send(buf, ASYNC);
@@ -314,7 +333,7 @@ static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer
 	
 	click_request += (is_strongest ^ 1);
 	
-	if((config & CF_UART_EN) && (UART_CANQUEUE(60))) /* prevent garbled lines */
+	if((config & CF_UART_EN) && (!(config & CF_UART_RAW_EN)))
 		exposure_to_uart(rpi_aem, rssi, peer_addr, adv_flags, is_strongest);
 }
 
@@ -333,13 +352,16 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	 * 03 03 6ffd 
 	 * 17 16 6ffd 660a6af67f7e946b3c3ce253dae9b411 78b0e9c2 (rpi, aem)
 	 * */
-	
+
+	if((config & CF_UART_RAW_EN) && (config & CF_UART_EN))
+		raw_to_uart(p, len, params->peerAddr, rssi);
+
 	if((len >= 31) && (p[0] == 2) && (p[1] == 1)) {
 		adv_flags = p[2];
 		p+=3;
 		len-=3;
 	}
-	
+
 	if((len >= 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd))
 		exposure_rx(p+8, rssi, params->peerAddr, adv_flags);
 }
@@ -451,12 +473,11 @@ static uint32_t wait_until(uint32_t end) {
 
 /* TODO:
  * 
- * - better parser for advertisement data
- * - add unfiltered serial raw output mode if B pressed during reset
- * - handle uBit.systemTime() overflow
  * - support for Calliope mini I2C and speaker
+ * - handle uBit.systemTime() overflow
  * 
  * further thoughts:
+ * - better parser for advertisement data?
  * - serial: support serial commands? (e.g. RPI-to-UART en/disable?)
  * - audio: mute clicks from oldest RPI or RPI with highest seen counter instead of highest RSSI?
  * - visual: map age/seen counter to LED position?
@@ -474,6 +495,9 @@ int main() {
 	if(!uBit.buttonA.isPressed())
 		randomize_age();
 	
+	if(uBit.buttonB.isPressed())
+		config |= CF_UART_RAW_EN | CF_UART_EN;
+
 	mode_change(0);
 	
 	/* display project identifier and version string both via LEDs and USB serial */
