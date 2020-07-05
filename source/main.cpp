@@ -17,7 +17,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.6-dev3"
+#define VERSION_STRING	"v0.6-dev4"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -50,11 +50,14 @@ static uint8_t strongest_rpi        = UINT8_MAX;
 #define MAX_BRIGHTNESS				UINT8_MAX
 
 #define REFRESH_HZ                  50
-#define REFRESH_DELAY               (1000/REFRESH_HZ)
+#define REFRESH_DELAY               (1000/REFRESH_HZ)    /* system time is in milliseconds */
 
-#define RPI_AGE_TIMEOUT				(50*2)				/* 50 equals 1 second */
+#define RPI_AGE_TIMEOUT				(REFRESH_HZ*2)       /* REFRESH_HZ equals 1 second */
 static uint8_t age_fadeout           = RPI_AGE_TIMEOUT;
 static uint8_t age_fadeout_non_apple = RPI_AGE_TIMEOUT;
+
+#define THRASHING_LOCKOUT           (RPI_AGE_TIMEOUT*2)  /* 4 seconds (200 < UINT8_MAX) */
+static uint8_t thrashing_likely      = 0;
 
 /* config bits */
 #define CF_UART_EN					(1<<0)	/* enable USB serial RPI output */
@@ -197,16 +200,23 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, uint8_t non_apple) {
 	
 	/* allocate rpi if not seen yet */
 	if(idx == RPI_N) {
-		/* TODO: handle case when all RPI slots are (i.e. the oldest one is) in use:
-		 * - don't increment seen counter?
-		 * - drop seen event (don't overwrite oldest RPI?)
-		 */
-		rpis_seen++;
-		non_apple_rpis_seen += non_apple;
-		/* reuse oldest rpi slot */
+
+		/* prepare to reclaim oldest RPI entry */
 		idx = oldest_rpi;
 		rpi = rpi_list + idx;
+
+		/* thrashing protection: only reclaim oldest entry if RPI no longer active */
+		if(rpi->age <= RPI_AGE_TIMEOUT)
+			return 0;
+
+		/* claim & reassign RPI entry */
 		rpi->short_rpi = short_rpi;
+
+		/* prevent inaccurate huge seen counter readings if more than RPI_N active RPIs are seen */
+		if(!thrashing_likely) {
+			rpis_seen++;
+			non_apple_rpis_seen += non_apple;
+		}
 	}
 	
 	/* nothing to do if already newest rpi */
@@ -438,7 +448,6 @@ static uint32_t wait_until(uint32_t end) {
 
 /* TODO:
  * 
- * - handle case with >= 25 RPIs in range
  * - better parser for advertisement data
  * - add unfiltered serial raw output mode if B pressed during reset
  * - handle uBit.systemTime() overflow
@@ -498,6 +507,12 @@ int main() {
 		
 		rpis_active = refresh_screen(now, &non_apple_rpis_active);
 
+		/* prevent inaccurate huge seen counter readings if more than RPI_N active RPIs are seen */
+		if(rpis_active == RPI_N)
+			thrashing_likely = THRASHING_LOCKOUT;
+		else if (thrashing_likely)
+			thrashing_likely--;
+
 		/* output rpi counter every 10 seconds */
 		if(((now - last_cntprint) >= 10000) && (uBit.serial.txBufferedSize() <= 16)) {
 			char buf[96];
@@ -508,6 +523,7 @@ int main() {
 			uBit.serial.send(buf, ASYNC);
 		}
 		
+		/* generate audio clicks if enabled */
 		sleep_time = REFRESH_DELAY;
 		if(clicks_done != click_request) {
 			clicks_done = click_request;
