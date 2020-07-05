@@ -43,6 +43,9 @@ yotta build
 cp build/bbc-microbit-classic-gcc-s130/source/corona-scanner-combined.hex /Volumes/MICROBIT/
 ```
 
+## Building on Ubuntu Linux
+sudo apt install yotta ninja-build srecord
+
 ## Building on Windows
 get https://launchpad.net/gcc-arm-embedded/+download for arm gcc  
 get https://github.com/ninja-build/ninja for building with cmake  
