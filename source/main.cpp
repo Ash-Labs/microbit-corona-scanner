@@ -17,7 +17,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.6-dev6"
+#define VERSION_STRING	"v0.6-dev7"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -26,9 +26,9 @@ static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0xac,0xb0,0xb9,0xbf,0xc6,0xcb,0xcf,0xd6,0xe1,0xe9,0xed,0xf1,0xf6,0xfa,0xfe,0xff
 };
 
-#define GAMMA_CORRECT(a)	(gamma_lut[(a)>>2])
+#define GAMMA_CORRECT(a)            (gamma_lut[(a)>>2])
 
-#define RAND_BDADDR_TYPE(a)      ((a)[5]>>6)
+#define RAND_BDADDR_TYPE(a)         ((a)[5]>>6)
 enum {
 	RAND_BDADDR_NONRESOLVABLE       = 0,
 	RAND_BDADDR_RESOLVABLE          = 1,
@@ -37,12 +37,13 @@ enum {
 };
 
 MicroBit uBit;
-MicroBitI2C* i2c_bus                = &uBit.i2c;
+MicroBitI2C *i2c_bus                = &uBit.i2c;
+static MicroBitPin *audio_out       = &uBit.io.P0;
 
 static uint32_t rpis_seen           = 0; /* includes apple */
 static uint32_t non_apple_rpis_seen = 0;
 
-static uint8_t click_request        = 0;
+static uint8_t audio_request        = 0;
 static uint8_t strongest_rpi        = UINT8_MAX;
 
 #define MIN_RSSI					(-98)
@@ -70,7 +71,7 @@ static uint8_t thrashing_likely      = 0;
 #define CF_DEVTYPE_VISUALIZE		(1<<5)	 /* device type visualisation 	*/
 #define CF_EXTLEDS_EN				(1<<6)	 /* use external LEDs			*/
 
-#define CF_CLICK_EN					(1<<8)	 /* Audio clicks enable 			*/
+#define CF_AUDIO_EN					(1<<8)	 /* Audio output enable         */
 #define CF_CALLIOPE_SPKR_EN         (1<<9)   /* Calliope mini speaker enable */
 
 #define CF_HW_CALLIOPE				(1<<10)  /* Calliope mini hw detected   */
@@ -343,7 +344,7 @@ static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer
 	uint8_t non_apple = (RAND_BDADDR_TYPE(peer_addr) != RAND_BDADDR_NONRESOLVABLE) || (adv_flags != APPLE_FLAGS);
 	uint8_t is_strongest = seen(short_rpi, rssi, non_apple);
 	
-	click_request += (is_strongest ^ 1);
+	audio_request += (is_strongest ^ 1);
 	
 	if((config & CF_UART_EN) && (!(config & CF_UART_RAW_EN)))
 		exposure_to_uart(rpi_aem, rssi, peer_addr, adv_flags, is_strongest);
@@ -378,34 +379,53 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 		exposure_rx(p+8, rssi, params->peerAddr, adv_flags);
 }
 
-static void audible_click(void) {
-	if(!(config & CF_HW_CALLIOPE)) {               /* microbit */
-		uBit.io.P0.setAnalogValue(512);
-		uBit.sleep(1);
-		uBit.io.P0.setAnalogValue(0);
+static int audio_signal(void) {
+
+	if(config & CF_CALLIOPE_SPKR_EN) {
+		audio_out->setAnalogValue(128);
+		return 1;
 	}
-	else if (!(config & CF_CALLIOPE_SPKR_EN)) {    /* Calliope P1 */
-		uBit.io.P2.setAnalogValue(512);
-		uBit.sleep(1);
-		uBit.io.P2.setAnalogValue(0);
-	}
-	else {                                         /* Calliope speaker */
-		/* TBD: speaker mode */
-	}
+
+	audio_out->setAnalogValue(512);
+	uBit.sleep(1);
+	audio_out->setAnalogValue(0);
+
+	return 0;
 }
 
 static void audio_mode_change(void) {
+	static DigitalOut *calliope_speaker_en = NULL;
+	static MicroBitPin *calliope_speaker = NULL;
+
 	if(!(config & CF_HW_CALLIOPE))
-		config ^= CF_CLICK_EN;
+		config ^= CF_AUDIO_EN;
 	else {
-		/* TBD: speaker mode */
-		config ^= CF_CLICK_EN;
-		uBit.io.P2.setAnalogValue(0);
-		uBit.io.P2.setAnalogPeriodUs(1000000/1000);
+		if(!(config & CF_AUDIO_EN)) { /* enable headphone mode */
+			config |= CF_AUDIO_EN;
+			audio_out = &uBit.io.P2;
+		}
+
+		else if(!(config & CF_CALLIOPE_SPKR_EN)) { /* enable speaker mode */
+			config |= CF_CALLIOPE_SPKR_EN;
+			if(!calliope_speaker_en) {
+				calliope_speaker_en = new DigitalOut(P0_28);
+				calliope_speaker = new MicroBitPin(MICROBIT_ID_ANY, P0_29, PIN_CAPABILITY_ANALOG_OUT);
+				calliope_speaker->setAnalogValue(0);
+				calliope_speaker->setAnalogPeriodUs(1000);
+			}
+			calliope_speaker_en->write(1);
+			audio_out = calliope_speaker;
+		}
+
+		else { /* silence */
+			config &= ~(CF_CALLIOPE_SPKR_EN | CF_AUDIO_EN);
+			calliope_speaker_en->write(0);
+		}
 	}
-	audible_click();
-	if(config & CF_CLICK_EN) /* click twice to signal clicks enabled */
-		click_request++;
+
+	audio_signal();
+	if(config & CF_AUDIO_EN) /* click twice to signal clicks enabled */
+		audio_request++;
 };
 
 /* visualisation modes:
@@ -545,7 +565,10 @@ static uint32_t wait_until(uint32_t end) {
  *   SCL: P0.19 (pad 27)
  *   SDA: P0.20 (pad 28)
  *   BMX055: mag+gyro+accel - accel: 0x18<<1, magn: 0x10<<1, gyro: 0x68<<1
- *   DRV8837: nSLEEP: P28 (sleep if low), IN1: P29, IN2: P30
+ *   DRV8837:
+ *      nSLEEP: P28 (sleep if low) - MMA8653FC_INT1 on microbit
+ *      IN1: P29 - MAG31100INT1 on microbit
+ *      IN2: P30 - SDA on microbit
  *   P0: P0.00 (SCL on microbit)
  *   P1: P0.01 (P2 on microbit)  ==> audio output
  *   P2: P0.02 (P1 on microbit)
@@ -589,7 +612,8 @@ static void hw_detect(void) {
 int main() {
 	uint32_t now = uBit.systemTime();
 	uint32_t last_cntprint = now;
-	uint8_t rpis_active, non_apple_rpis_active, clicks_done = 0, sleep_time = REFRESH_DELAY;
+	uint8_t rpis_active, non_apple_rpis_active;
+	uint8_t audio_active = 0, audio_done = 0, sleep_time = REFRESH_DELAY;
 
 	hw_detect();
 
@@ -626,19 +650,22 @@ int main() {
     uBit.ble->gap().setScanParams(500, 400);
     uBit.ble->gap().startScan(advertisementCallback);
 
-	/* audio output for microbit is on P0 only - initialize once during startup */
-	if(!(config & CF_HW_CALLIOPE)) {
-		uBit.io.P0.setAnalogValue(0);
-		uBit.io.P0.setAnalogPeriodUs(1000000/1000);
-	}
+	if(config & CF_HW_CALLIOPE)
+		audio_out = &uBit.io.P2;
+
+	audio_out->setAnalogValue(0);
+	audio_out->setAnalogPeriodUs(1000000/1000);
 
 	/* do a dummy click */
-	click_request++;
+	audio_request++;
 
     while (true) {
 		button_service();
 
 		now = wait_until(now + sleep_time);
+
+		if(audio_active)
+			audio_out->setAnalogValue(0);
 
 		rpis_active = refresh_screen(now, &non_apple_rpis_active);
 
@@ -658,15 +685,16 @@ int main() {
 			uBit.serial.send(buf, ASYNC);
 		}
 
-		/* generate audio clicks if enabled */
+		/* generate audio signal if enabled */
 		sleep_time = REFRESH_DELAY;
-		if(clicks_done != click_request) {
-			clicks_done = click_request;
-			if(config & CF_CLICK_EN) {
-				audible_click();
-				sleep_time--;
+		audio_active = 0;
+		if(audio_done != audio_request) {
+			audio_done = audio_request;
+			if(config & CF_AUDIO_EN) {
+				audio_active = audio_signal();
+				sleep_time -= (audio_active ^ 1);
 			}
 		}
-    }
+    } /* main loop */
     return 0;
 }
