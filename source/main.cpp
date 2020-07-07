@@ -379,10 +379,34 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 }
 
 static void audible_click(void) {
-	uBit.io.P0.setAnalogValue(512);
-	uBit.sleep(1);
-	uBit.io.P0.setAnalogValue(0);
+	if(!(config & CF_HW_CALLIOPE)) {               /* microbit */
+		uBit.io.P0.setAnalogValue(512);
+		uBit.sleep(1);
+		uBit.io.P0.setAnalogValue(0);
+	}
+	else if (!(config & CF_CALLIOPE_SPKR_EN)) {    /* Calliope P1 */
+		uBit.io.P2.setAnalogValue(512);
+		uBit.sleep(1);
+		uBit.io.P2.setAnalogValue(0);
+	}
+	else {                                         /* Calliope speaker */
+		/* TBD: speaker mode */
+	}
 }
+
+static void audio_mode_change(void) {
+	if(!(config & CF_HW_CALLIOPE))
+		config ^= CF_CLICK_EN;
+	else {
+		/* TBD: speaker mode */
+		config ^= CF_CLICK_EN;
+		uBit.io.P2.setAnalogValue(0);
+		uBit.io.P2.setAnalogPeriodUs(1000000/1000);
+	}
+	audible_click();
+	if(config & CF_CLICK_EN) /* click twice to signal clicks enabled */
+		click_request++;
+};
 
 /* visualisation modes:
  * 0: persistence with fadeout from RSSI				[DEFAULT]
@@ -390,7 +414,7 @@ static void audible_click(void) {
  * 2: persistence at full brightness
  * 3: blink at full brightness
  */
-static void mode_change(uint8_t inc) {
+static void visual_mode_change(uint8_t inc) {
 	static uint8_t mode = 0;
 	
 	mode+=inc;
@@ -442,19 +466,15 @@ void onLongClick(int btn_id) {
 		config ^= CF_UART_EN;
 	else if (btn_id == MICROBIT_ID_BUTTON_B) {
 		config ^= CF_DEVTYPE_VISUALIZE;
-		mode_change(0);
+		visual_mode_change(0);
 	}
 }
 
 void onClick(int btn_id) {
-	if (btn_id == MICROBIT_ID_BUTTON_A) {
-		config ^= CF_CLICK_EN;
-		audible_click();
-		if(config & CF_CLICK_EN) /* click twice to signal clicks enabled */
-			click_request++;
-	}
+	if (btn_id == MICROBIT_ID_BUTTON_A)
+		audio_mode_change();
     else if (btn_id == MICROBIT_ID_BUTTON_B)
-		mode_change(1);
+		visual_mode_change(1);
 }
 
 static void button_service(void) {
@@ -515,6 +535,9 @@ static uint32_t wait_until(uint32_t end) {
  *   MAG3110: mag - 0x0E<<1
  *   MMA8653FC: accel - 0x3B
  *   LSM303AGR: mag+accel - Linear acceleration sensor: 0x33, Magnetic field sensor: 0x3d
+ *   P0: P0.03  ==> audio output
+ *   P1: P0.02
+ *   P2: P0.01
  *
  * Calliope Mini:
  *   BTN A: P17 low active
@@ -523,6 +546,10 @@ static uint32_t wait_until(uint32_t end) {
  *   SDA: P0.20 (pad 28)
  *   BMX055: mag+gyro+accel - accel: 0x18<<1, magn: 0x10<<1, gyro: 0x68<<1
  *   DRV8837: nSLEEP: P28 (sleep if low), IN1: P29, IN2: P30
+ *   P0: P0.00 (SCL on microbit)
+ *   P1: P0.01 (P2 on microbit)  ==> audio output
+ *   P2: P0.02 (P1 on microbit)
+ *   P3: P0.22 (MISO on microbit)
  */
 
 static void hw_detect(void) {
@@ -576,7 +603,7 @@ int main() {
 	if(!BTN_B_PRESSED())
 		randomize_age();
 
-	mode_change(0);
+	visual_mode_change(0);
 
 	/* display project identifier and version string both via LEDs and USB serial */
 	uBit.display.scroll("cs-" VERSION_STRING, MICROBIT_DEFAULT_SCROLL_SPEED/2);
@@ -599,10 +626,13 @@ int main() {
     uBit.ble->gap().setScanParams(500, 400);
     uBit.ble->gap().startScan(advertisementCallback);
 
-	uBit.io.P0.setAnalogValue(0);
-	uBit.io.P0.setAnalogPeriodUs(1000000/1000);
+	/* audio output for microbit is on P0 only - initialize once during startup */
+	if(!(config & CF_HW_CALLIOPE)) {
+		uBit.io.P0.setAnalogValue(0);
+		uBit.io.P0.setAnalogPeriodUs(1000000/1000);
+	}
 
-	/* do a dummy click */	
+	/* do a dummy click */
 	click_request++;
 
     while (true) {
