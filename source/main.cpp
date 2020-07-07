@@ -478,6 +478,8 @@ static uint32_t wait_until(uint32_t end) {
 }
 
 /* micro:bit:
+ *   BTN A: P17 low active
+ *   BTN B: P26 low active
  *   SCL: P0.00 (pad 4)
  *   SDA: P0.30 (pad 3)
  *   MAG3110: mag - 0x0E<<1
@@ -485,9 +487,12 @@ static uint32_t wait_until(uint32_t end) {
  *   LSM303AGR: mag+accel - Linear acceleration sensor: 0x33, Magnetic field sensor: 0x3d
  *
  * Calliope Mini:
+ *   BTN A: P17 low active
+ *   BTN B: P16 low active
  *   SCL: P0.19 (pad 27)
  *   SDA: P0.20 (pad 28)
  *   BMX055: mag+gyro+accel - accel: 0x18<<1, magn: 0x10<<1, gyro: 0x68<<1
+ *   DRV8837: nSLEEP: P28 (sleep if low), IN1: P29, IN2: P30
  */
 
 static void hw_init(void) {
