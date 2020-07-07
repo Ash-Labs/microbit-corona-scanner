@@ -37,6 +37,7 @@ enum {
 };
 
 MicroBit uBit;
+MicroBitI2C* i2c_bus                = &uBit.i2c;
 
 static uint32_t rpis_seen           = 0; /* includes apple */
 static uint32_t non_apple_rpis_seen = 0;
@@ -72,7 +73,7 @@ static uint8_t thrashing_likely      = 0;
 #define CF_CLICK_EN					(1<<8)	 /* Audio clicks enable 			*/
 #define CF_CALLIOPE_SPKR_EN         (1<<9)   /* Calliope mini speaker enable */
 
-#define CF_HW_CALLIOPE				(1<<10); /* Calliope mini hw detected   */
+#define CF_HW_CALLIOPE				(1<<10)  /* Calliope mini hw detected   */
 
 static uint16_t config				= 0;
 
@@ -476,6 +477,41 @@ static uint32_t wait_until(uint32_t end) {
 	return ts2;
 }
 
+/* micro:bit:
+ *   SCL: P0.00 (pad 4)
+ *   SDA: P0.30 (pad 3)
+ *   MAG3110: mag - 0x0E<<1
+ *   MMA8653FC: accel - 0x3B
+ *   LSM303AGR: mag+accel - Linear acceleration sensor: 0x33, Magnetic field sensor: 0x3d
+ *
+ * Calliope Mini:
+ *   SCL: P0.19 (pad 27)
+ *   SDA: P0.20 (pad 28)
+ *   BMX055: mag+gyro+accel - accel: 0x18<<1, magn: 0x10<<1, gyro: 0x68<<1
+ */
+
+static void hw_init(void) {
+	char tmp;
+	int res = uBit.i2c.read(0x33, &tmp, 1);        /* try to read from micro:bit LSM303AGR */
+	if(res == MICROBIT_OK)
+		return;
+	res = uBit.i2c.read(0x3b, &tmp, 1);            /* if LSM303AGR not found try read from MMA8653FC */
+	if(res == MICROBIT_OK)
+		return;
+	else {                                         /* doesn't look like a micro:bit */
+		MicroBitI2C* calliope_i2c = new MicroBitI2C(P0_20, P0_19);             /* try Calliope mini I2C */
+		res = calliope_i2c->read(0x10<<1, &tmp, 1);     /* try to read from calliope BMX055 accel */
+		if(res != MICROBIT_OK) {                    /* this shouldn't happen oO - not a calliope either? */
+			delete calliope_i2c;
+			return;
+		}
+		/* Calliope mini detected */
+		config |= CF_HW_CALLIOPE;
+		i2c_bus = calliope_i2c;
+		/* TODO: calliope speaker config? */
+	}
+}
+
 /* TODO:
  * 
  * - support for Calliope mini I2C and speaker
@@ -493,6 +529,8 @@ int main() {
 	uint32_t last_cntprint = now;
 	uint8_t rpis_active, non_apple_rpis_active, clicks_done = 0, sleep_time = REFRESH_DELAY;
 
+	hw_init();
+
 	uBit.serial.setTxBufferSize(UART_TXBUFSZ);
 
 	rpi_list_init();
@@ -504,10 +542,14 @@ int main() {
 		config |= CF_UART_RAW_EN | CF_UART_EN;
 
 	mode_change(0);
-	
+
 	/* display project identifier and version string both via LEDs and USB serial */
 	uBit.display.scroll("cs-" VERSION_STRING, MICROBIT_DEFAULT_SCROLL_SPEED/2);
 	uBit.serial.send("corona-scanner " VERSION_STRING "\r\n", SYNC_SPINWAIT);
+
+	/* show detected hardware platform */
+	uBit.serial.send("hardware: ", SYNC_SPINWAIT);
+	uBit.serial.send(config & CF_HW_CALLIOPE ? "Calliope mini\r\n" : "micro:bit\r\n", SYNC_SPINWAIT);
 
 	if(is31fl3738_init() == MICROBIT_OK) {
 		uBit.serial.send("using IS31FL3738 output\r\n", SYNC_SPINWAIT);

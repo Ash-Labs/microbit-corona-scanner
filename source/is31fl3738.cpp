@@ -9,6 +9,7 @@
 //#define I2C_DEBUG
 
 extern MicroBit uBit;
+extern MicroBitI2C* i2c_bus;
 
 #ifdef I2C_DEBUG
 #define I2C_WRITE i2c_write_debug
@@ -17,12 +18,12 @@ static int i2c_write_debug(uint8_t addr, const char* buf, int n) {
 	uBit.serial.printf("write %d: ",n);
 	for(i=0;i<n;i++)
 		uBit.serial.printf("%02x ",buf[i]);
-	i = uBit.i2c.write(addr, buf, n);
+	i = i2c_bus->write(addr, buf, n);
 	uBit.serial.printf("res %d\r\n",i);
 	return i;
 }
 #else
-#define I2C_WRITE uBit.i2c.write
+#define I2C_WRITE i2c_bus->write
 #endif
 
 #define CMD(c)         ((c)|0x80)
@@ -83,11 +84,11 @@ void is31fl3738_setPixel(int16_t x , int16_t y, uint8_t value) {
 int is31fl3738_init(void) {
 	const uint8_t *init;
 	char tmp;
-	int res = uBit.i2c.read(SLAVE_ADDR, &tmp, 1);
+	int res = i2c_bus->read(SLAVE_ADDR, &tmp, 1);
 	if(res != MICROBIT_OK)
 		return res;
 
-	uBit.i2c.frequency(400000);
+	i2c_bus->frequency(400000);
 
 	for(init = init_data; *init; init++) {
 		uint8_t v = *init;
