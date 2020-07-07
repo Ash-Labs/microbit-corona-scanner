@@ -492,16 +492,16 @@ static uint32_t wait_until(uint32_t end) {
 
 static void hw_init(void) {
 	char tmp;
-	int res = uBit.i2c.read(0x33, &tmp, 1);        /* try to read from micro:bit LSM303AGR */
+	int res = uBit.i2c.read(0x33, &tmp, 1);             /* try to read from micro:bit LSM303AGR */
 	if(res == MICROBIT_OK)
 		return;
-	res = uBit.i2c.read(0x3b, &tmp, 1);            /* if LSM303AGR not found try read from MMA8653FC */
+	res = uBit.i2c.read(0x3b, &tmp, 1);                 /* if LSM303AGR not found try read from MMA8653FC */
 	if(res == MICROBIT_OK)
 		return;
-	else {                                         /* doesn't look like a micro:bit */
+	else {                                              /* doesn't look like a micro:bit */
 		MicroBitI2C* calliope_i2c = new MicroBitI2C(P0_20, P0_19);             /* try Calliope mini I2C */
-		res = calliope_i2c->read(0x10<<1, &tmp, 1);     /* try to read from calliope BMX055 accel */
-		if(res != MICROBIT_OK) {                    /* this shouldn't happen oO - not a calliope either? */
+		res = calliope_i2c->read(0x18<<1, &tmp, 1);     /* try to read from calliope BMX055 accel */
+		if(res != MICROBIT_OK) {                        /* this shouldn't happen oO - not a calliope either? */
 			delete calliope_i2c;
 			return;
 		}
