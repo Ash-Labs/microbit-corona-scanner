@@ -88,7 +88,7 @@ struct rpi_s {
 };
 
 #define UART_TXBUFSZ                128
-#define UART_CANQUEUE(a)            ((UART_TXBUFSZ - uBit.serial.txBufferedSize()) >= (a))
+#define UART_CANQUEUE(a)            ((UART_TXBUFSZ - uBit.serial.txBufferedSize()) >= (int)(a))
 
 #define APPLE_FLAGS                 0x1A
 
