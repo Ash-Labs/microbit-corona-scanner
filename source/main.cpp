@@ -17,7 +17,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.6-dev5"
+#define VERSION_STRING	"v0.6-dev6"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -86,6 +86,12 @@ struct rpi_s {
 	uint8_t older;
 	uint8_t newer;
 };
+
+#define BTN_CLICK_THRESHOLD         (2)
+#define BTN_LONGCLICK_THRESHOLD     (REFRESH_HZ+(REFRESH_HZ/2))
+
+#define BTN_A_PRESSED()		        uBit.buttonA.isPressed()
+#define BTN_B_PRESSED()		        (config & CF_HW_CALLIOPE ? (!uBit.io.P16.getDigitalValue()) : uBit.buttonB.isPressed())
 
 #define UART_TXBUFSZ                128
 #define UART_CANQUEUE(a)            ((UART_TXBUFSZ - uBit.serial.txBufferedSize()) >= (int)(a))
@@ -419,36 +425,60 @@ static void mode_change(uint8_t inc) {
 }
 
 /* button usage:
- * 
+ *
  * (long clicks are >= 2 seconds)
- * 
- * A during reset: sequential LED usage instead of randomized
- * 
+ *
  * A short click : audio clicks on/off
- * A long click  : enable RPI output via USB serial
- * 
  * B short click : change visualisation mode
+ *
+ * A long click  : enable RPI output via USB serial
  * B long click  : non-Apple device type visualisation on/off
- * 
+ *
+ * A during reset: output unfiltered raw beacon data via serial interface
+ * B during reset: sequential LED usage instead of randomized
  */
-void onLongClick(MicroBitEvent e) {
-	if (e.source == MICROBIT_ID_BUTTON_A)
+void onLongClick(int btn_id) {
+	if (btn_id == MICROBIT_ID_BUTTON_A)
 		config ^= CF_UART_EN;
-	else if (e.source == MICROBIT_ID_BUTTON_B) {
+	else if (btn_id == MICROBIT_ID_BUTTON_B) {
 		config ^= CF_DEVTYPE_VISUALIZE;
 		mode_change(0);
 	}
 }
 
-void onClick(MicroBitEvent e) {
-	if (e.source == MICROBIT_ID_BUTTON_A) {
+void onClick(int btn_id) {
+	if (btn_id == MICROBIT_ID_BUTTON_A) {
 		config ^= CF_CLICK_EN;
 		audible_click();
 		if(config & CF_CLICK_EN) /* click twice to signal clicks enabled */
 			click_request++;
 	}
-    else if (e.source == MICROBIT_ID_BUTTON_B)
+    else if (btn_id == MICROBIT_ID_BUTTON_B)
 		mode_change(1);
+}
+
+static void button_service(void) {
+	static uint8_t btn_a_count = 0, btn_b_count = 0;
+
+	if(BTN_A_PRESSED())
+		btn_a_count += btn_a_count < 255 ? 1 : 0;
+	else if(btn_a_count) {
+		if(btn_a_count >= BTN_LONGCLICK_THRESHOLD)
+			onLongClick(MICROBIT_ID_BUTTON_A);
+		else if(btn_a_count >= BTN_CLICK_THRESHOLD)
+			onClick(MICROBIT_ID_BUTTON_A);
+		btn_a_count = 0;
+	}
+
+	if(BTN_B_PRESSED())
+		btn_b_count += btn_b_count < 255 ? 1 : 0;
+	else if(btn_b_count) {
+		if(btn_b_count >= BTN_LONGCLICK_THRESHOLD)
+			onLongClick(MICROBIT_ID_BUTTON_B);
+		else if(btn_b_count >= BTN_CLICK_THRESHOLD)
+			onClick(MICROBIT_ID_BUTTON_B);
+		btn_b_count = 0;
+	}
 }
 
 static void randomize_age(void) {
@@ -488,14 +518,14 @@ static uint32_t wait_until(uint32_t end) {
  *
  * Calliope Mini:
  *   BTN A: P17 low active
- *   BTN B: P16 low active
+ *   BTN B: P16 low active (P16 at microbit edge connector)
  *   SCL: P0.19 (pad 27)
  *   SDA: P0.20 (pad 28)
  *   BMX055: mag+gyro+accel - accel: 0x18<<1, magn: 0x10<<1, gyro: 0x68<<1
  *   DRV8837: nSLEEP: P28 (sleep if low), IN1: P29, IN2: P30
  */
 
-static void hw_init(void) {
+static void hw_detect(void) {
 	char tmp;
 	int res = uBit.i2c.read(0x33, &tmp, 1);             /* try to read from micro:bit LSM303AGR */
 	if(res == MICROBIT_OK)
@@ -513,7 +543,7 @@ static void hw_init(void) {
 		/* Calliope mini detected */
 		config |= CF_HW_CALLIOPE;
 		i2c_bus = calliope_i2c;
-		/* TODO: calliope speaker config? */
+		uBit.io.P16.setPull(PullNone);         /* make button B usable on Calliope */
 	}
 }
 
@@ -534,17 +564,17 @@ int main() {
 	uint32_t last_cntprint = now;
 	uint8_t rpis_active, non_apple_rpis_active, clicks_done = 0, sleep_time = REFRESH_DELAY;
 
-	hw_init();
+	hw_detect();
 
 	uBit.serial.setTxBufferSize(UART_TXBUFSZ);
 
 	rpi_list_init();
-	
-	if(!uBit.buttonA.isPressed())
-		randomize_age();
-	
-	if(uBit.buttonB.isPressed())
+
+	if(BTN_A_PRESSED())
 		config |= CF_UART_RAW_EN | CF_UART_EN;
+
+	if(!BTN_B_PRESSED())
+		randomize_age();
 
 	mode_change(0);
 
@@ -561,14 +591,8 @@ int main() {
 		config |= CF_EXTLEDS_EN;
 	}
 
-    uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onClick);
-    uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onClick);
-    
-	uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
-	uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_LONG_CLICK, onLongClick);
-	
 	btle_set_gatt_table_size(BLE_GATTS_ATTR_TAB_SIZE_MIN);
-	
+
     uBit.ble = new BLEDevice();
     uBit.ble->init();
 
@@ -577,13 +601,15 @@ int main() {
 
 	uBit.io.P0.setAnalogValue(0);
 	uBit.io.P0.setAnalogPeriodUs(1000000/1000);
-	
+
 	/* do a dummy click */	
 	click_request++;
 
     while (true) {
+		button_service();
+
 		now = wait_until(now + sleep_time);
-		
+
 		rpis_active = refresh_screen(now, &non_apple_rpis_active);
 
 		/* prevent inaccurate huge seen counter readings if more than RPI_N active RPIs are seen */
@@ -601,7 +627,7 @@ int main() {
 				rpis_seen, non_apple_rpis_seen);
 			uBit.serial.send(buf, ASYNC);
 		}
-		
+
 		/* generate audio clicks if enabled */
 		sleep_time = REFRESH_DELAY;
 		if(clicks_done != click_request) {
