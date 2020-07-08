@@ -675,10 +675,10 @@ int main() {
 		else if (thrashing_likely)
 			thrashing_likely--;
 
-		/* output rpi counter every 10 seconds */
-		if(((now - last_cntprint) >= 10000) && (UART_CANQUEUE(84))) {
+		/* output rpi counter every ~8 seconds */
+		if((last_cntprint != (now>>13)) && (UART_CANQUEUE(84))) {
 			char buf[84];
-			last_cntprint = now;
+			last_cntprint = now>>13;
 			sprintf(buf,"RPIs active: %s%2d (non-Apple: >=%2d) seen: %ld (non-Apple: >=%ld)\r\n",
 				rpis_active < RPI_N ? "  " : ">=",  rpis_active, non_apple_rpis_active, 
 				rpis_seen, non_apple_rpis_seen);
