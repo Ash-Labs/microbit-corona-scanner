@@ -38,7 +38,7 @@ static const uint8_t init_data[] __attribute__ ((aligned (4))) = {
         0xff, 0x03, 0xff, 0x03,  /* SW3 */
         0xff, 0x03, 0xff, 0x03,  /* SW4 */
         0xff, 0x03, 0xff, 0x03,  /* SW5 */
-	CMD(IS31FL3738_CMD_FUNC),   DATA(3), 0x00, 0x01, 0x80,            /* normal operation, set GCRR to 128 */
+	CMD(IS31FL3738_CMD_FUNC),   DATA(3), 0x00, 0x01, 0x80,            /* normal operation, set GCC to 128 */
 	CMD(IS31FL3738_CMD_PWM),                                          /* switch to PWM page access */
 	//DATA(3), 0x00, 0x40, 0x40, /* PWM test data */
 	INIT_END
