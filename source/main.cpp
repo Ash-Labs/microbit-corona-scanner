@@ -601,7 +601,6 @@ static void hw_detect(void) {
  * 
  * - handle uBit.systemTime() overflow
  * - full audio volume for Calliope speaker
- * - check Calliope current draw (36mA > 16mA w/ microbit?)
  * 
  * further thoughts:
  * - better parser for advertisement data?
