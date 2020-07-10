@@ -2,7 +2,9 @@
 #include "MicroBit.h"
 #include "ble/DiscoveredCharacteristic.h"
 #include "ble/DiscoveredService.h"
+#include "config_flags.h"
 #include "is31fl3738.h"
+#include "audio.h"
 
 #if YOTTA_CFG_MICROBIT_S130 != 1
 #error This code *only* works with the Nordic S130 softdevice
@@ -17,7 +19,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.6-dev7"
+#define VERSION_STRING	"v0.6-dev8"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -38,7 +40,6 @@ enum {
 
 MicroBit uBit;
 MicroBitI2C *i2c_bus                = &uBit.i2c;
-static MicroBitPin *audio_out       = &uBit.io.P0;
 
 static uint32_t rpis_seen           = 0; /* includes apple */
 static uint32_t non_apple_rpis_seen = 0;
@@ -61,22 +62,7 @@ static uint8_t age_fadeout_non_apple = RPI_AGE_TIMEOUT;
 #define THRASHING_LOCKOUT           (RPI_AGE_TIMEOUT*2)  /* 4 seconds (200 < UINT8_MAX) */
 static uint8_t thrashing_likely      = 0;
 
-/* config bits */
-#define CF_UART_EN					(1<<0)	 /* enable USB serial RPI output */
-#define CF_UART_RAW_EN				(1<<1)   /* enable unfiltered beacon output */
-
-#define CF_RSSI_BRIGHTNESS			(1<<2)	 /* use RSSI for LED brightness 	*/
-#define CF_PERSISTENCE_EN			(1<<3)	 /* persistence visualisation 	*/
-#define CF_FADEOUT_EN				(1<<4)	 /* fadeout LEDs over time 		*/
-#define CF_DEVTYPE_VISUALIZE		(1<<5)	 /* device type visualisation 	*/
-#define CF_EXTLEDS_EN				(1<<6)	 /* use external LEDs			*/
-
-#define CF_AUDIO_EN					(1<<8)	 /* Audio output enable         */
-#define CF_CALLIOPE_SPKR_EN         (1<<9)   /* Calliope mini speaker enable */
-
-#define CF_HW_CALLIOPE				(1<<10)  /* Calliope mini hw detected   */
-
-static uint16_t config				= 0;
+uint16_t config                      = 0;
 
 struct rpi_s {
 	uint16_t short_rpi;
@@ -379,53 +365,22 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 		exposure_rx(p+8, rssi, params->peerAddr, adv_flags);
 }
 
-static int audio_signal(void) {
-
-	if(config & CF_CALLIOPE_SPKR_EN) {
-		audio_out->setAnalogValue(128);
-		return 1;
-	}
-
-	audio_out->setAnalogValue(512);
-	uBit.sleep(1);
-	audio_out->setAnalogValue(0);
-
-	return 0;
-}
-
 static void audio_mode_change(void) {
-	static DigitalOut *calliope_speaker_en = NULL;
-	static MicroBitPin *calliope_speaker = NULL;
 
 	if(!(config & CF_HW_CALLIOPE))
 		config ^= CF_AUDIO_EN;
 	else {
-		if(!(config & CF_AUDIO_EN)) { /* enable headphone mode */
+		if(!(config & CF_AUDIO_EN)) /* enable headphone mode */
 			config |= CF_AUDIO_EN;
-			audio_out = &uBit.io.P2;
-		}
-
-		else if(!(config & CF_CALLIOPE_SPKR_EN)) { /* enable speaker mode */
+		else if(!(config & CF_CALLIOPE_SPKR_EN)) /* enable speaker mode */
 			config |= CF_CALLIOPE_SPKR_EN;
-			if(!calliope_speaker_en) {
-				calliope_speaker_en = new DigitalOut(P0_28);
-				calliope_speaker = new MicroBitPin(MICROBIT_ID_ANY, P0_29, PIN_CAPABILITY_ANALOG_OUT);
-				calliope_speaker->setAnalogValue(0);
-				calliope_speaker->setAnalogPeriodUs(1000);
-			}
-			calliope_speaker_en->write(1);
-			audio_out = calliope_speaker;
-		}
-
-		else { /* silence */
+		else /* silence */
 			config &= ~(CF_CALLIOPE_SPKR_EN | CF_AUDIO_EN);
-			calliope_speaker_en->write(0);
-		}
-	}
+		audio_reconfigure();
+	} /* calliope mode */
 
-	audio_signal();
-	if(config & CF_AUDIO_EN) /* click twice to signal clicks enabled */
-		audio_request++;
+	if(config & CF_AUDIO_EN)
+		audio_signal();
 };
 
 /* visualisation modes:
@@ -600,7 +555,6 @@ static void hw_detect(void) {
 /* TODO:
  * 
  * - handle uBit.systemTime() overflow
- * - full audio volume for Calliope speaker
  * 
  * further thoughts:
  * - better parser for advertisement data?
@@ -613,7 +567,7 @@ int main() {
 	uint32_t now = uBit.systemTime();
 	uint32_t last_cntprint = now;
 	uint8_t rpis_active, non_apple_rpis_active;
-	uint8_t audio_active = 0, audio_done = 0, sleep_time = REFRESH_DELAY;
+	uint8_t audio_done = 0, sleep_time = REFRESH_DELAY;
 
 	hw_detect();
 
@@ -650,22 +604,14 @@ int main() {
     uBit.ble->gap().setScanParams(500, 400);
     uBit.ble->gap().startScan(advertisementCallback);
 
-	if(config & CF_HW_CALLIOPE)
-		audio_out = &uBit.io.P2;
-
-	audio_out->setAnalogValue(0);
-	audio_out->setAnalogPeriodUs(1000000/1000);
-
-	/* do a dummy click */
-	audio_request++;
+	audio_init();
 
     while (true) {
-		button_service();
-
 		now = wait_until(now + sleep_time);
 
-		if(audio_active)
-			audio_out->setAnalogValue(0);
+		audio_off();
+
+		button_service();
 
 		rpis_active = refresh_screen(now, &non_apple_rpis_active);
 
@@ -687,13 +633,10 @@ int main() {
 
 		/* generate audio signal if enabled */
 		sleep_time = REFRESH_DELAY;
-		audio_active = 0;
 		if(audio_done != audio_request) {
 			audio_done = audio_request;
-			if(config & CF_AUDIO_EN) {
-				audio_active = audio_signal();
-				sleep_time -= (audio_active ^ 1);
-			}
+			if(config & CF_AUDIO_EN)
+				sleep_time -= audio_signal();
 		}
     } /* main loop */
     return 0;
