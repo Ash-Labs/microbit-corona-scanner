@@ -127,13 +127,10 @@ static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
 
 	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(RPI_RSSI(rpi)) : UINT8_MAX;
 
-	/* add 2Hz on/off blinking for non-apple devices if persistence mode and non-apple visualisation enabled */
-	if((config & CF_PERSISTENCE_EN) && (config & CF_DEVTYPE_VISUALIZE) && (RPI_DEVICE_NON_APPLE(rpi))) {
-		uint32_t fraction = now&511;
-		if(fraction > 255)
-			return 0;
-	}
-	
+	/* add ~2Hz on/off blinking for non-apple devices if persistence mode and non-apple visualisation enabled */
+	if((config & CF_PERSISTENCE_EN) && (config & CF_DEVTYPE_VISUALIZE) && (RPI_DEVICE_NON_APPLE(rpi)) && (now&0x100))
+		return 0;
+
 	if(config & CF_FADEOUT_EN) {
 		uint32_t v32 = val;
 		v32 *= RPI_AGE_TIMEOUT-age;
