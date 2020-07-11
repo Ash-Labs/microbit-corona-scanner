@@ -66,7 +66,7 @@ uint16_t config                      = 0;
 
 struct bd_s {
 	uint16_t short_id;
-	uint8_t devtype_rssi;
+	uint8_t type_rssi;
 	uint8_t age;
 	
 	/* tiny age-sorted linked list w/o pointers to save precious RAM */
@@ -85,8 +85,8 @@ struct bd_s {
 
 #define RPI_APPLE_FLAGS             0x1A
 
-#define BD_RPI_NON_APPLE(a)         ((a)->devtype_rssi>>7)
-#define BD_RSSI(a)                  ((a)->devtype_rssi|0x80)
+#define BD_RPI_NON_APPLE(a)         ((a)->type_rssi>>7)
+#define BD_RSSI(a)                  ((a)->type_rssi|0x80)
 
 #define BD_N                        25
 
@@ -191,7 +191,7 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *rpis_non_apple_active)
 	return bds;
 }
 
-static uint8_t seen(uint16_t short_id, int8_t rssi, uint8_t dev_type) {
+static uint8_t seen(uint16_t short_id, int8_t rssi, uint8_t type) {
 	struct bd_s *bd = bd_list;
 	uint16_t x,y;
 	int idx;
@@ -221,7 +221,7 @@ static uint8_t seen(uint16_t short_id, int8_t rssi, uint8_t dev_type) {
 		/* prevent inaccurate huge seen counter readings if more than BD_N active BDs are seen */
 		if(!thrashing_likely) {
 			bds_seen++;
-			rpis_non_apple_seen += dev_type;
+			rpis_non_apple_seen += type;
 		}
 	}
 	
@@ -246,7 +246,7 @@ static uint8_t seen(uint16_t short_id, int8_t rssi, uint8_t dev_type) {
 		return 0;
 
 	rssi = MIN(rssi, -1); /* clamp to -1 (negative numbers only) */
-	bd->devtype_rssi = (dev_type<<7)|(rssi&0x7f);
+	bd->type_rssi = (type<<7)|(rssi&0x7f);
 
 	bd->age = 0;
 
