@@ -41,11 +41,11 @@ enum {
 MicroBit uBit;
 MicroBitI2C *i2c_bus                = &uBit.i2c;
 
-static uint32_t ids_seen            = 0;
-static uint32_t non_apple_rpis_seen = 0;
+static uint32_t bds_seen            = 0;
+static uint32_t rpis_non_apple_seen = 0;
 
 static uint8_t audio_request        = 0;
-static uint8_t strongest_id         = UINT8_MAX;
+static uint8_t strongest_bd         = UINT8_MAX;
 
 #define MIN_RSSI					(-98)
 #define MAX_RSSI					(-56)
@@ -55,17 +55,17 @@ static uint8_t strongest_id         = UINT8_MAX;
 #define REFRESH_HZ                  50
 #define REFRESH_DELAY               (1000/REFRESH_HZ)    /* system time is in milliseconds */
 
-#define RPI_AGE_TIMEOUT				(REFRESH_HZ*2)       /* REFRESH_HZ equals 1 second */
-static uint8_t age_fadeout           = RPI_AGE_TIMEOUT;
-static uint8_t age_fadeout_non_apple = RPI_AGE_TIMEOUT;
+#define BD_AGE_TIMEOUT				(REFRESH_HZ*2)       /* REFRESH_HZ equals 1 second */
+static uint8_t bd_age_fadeout            = BD_AGE_TIMEOUT;
+static uint8_t rpi_age_fadeout_non_apple = BD_AGE_TIMEOUT;
 
-#define THRASHING_LOCKOUT           (RPI_AGE_TIMEOUT*2)  /* 4 seconds (200 < UINT8_MAX) */
+#define THRASHING_LOCKOUT           (BD_AGE_TIMEOUT*2)  /* 4 seconds (200 < UINT8_MAX) */
 static uint8_t thrashing_likely      = 0;
 
 uint16_t config                      = 0;
 
-struct rpi_s {
-	uint16_t short_rpi;
+struct bd_s {
+	uint16_t short_id;
 	uint8_t devtype_rssi;
 	uint8_t age;
 	
@@ -83,27 +83,27 @@ struct rpi_s {
 #define UART_TXBUFSZ                128
 #define UART_CANQUEUE(a)            ((UART_TXBUFSZ - uBit.serial.txBufferedSize()) >= (int)(a))
 
-#define APPLE_FLAGS                 0x1A
+#define RPI_APPLE_FLAGS             0x1A
 
-#define RPI_DEVICE_NON_APPLE(a)     ((a)->devtype_rssi>>7)
-#define RPI_RSSI(a)                 ((a)->devtype_rssi|0x80)
+#define BD_RPI_NON_APPLE(a)         ((a)->devtype_rssi>>7)
+#define BD_RSSI(a)                  ((a)->devtype_rssi|0x80)
 
-#define RPI_N                       25
+#define BD_N                        25
 
-static struct rpi_s rpi_list[RPI_N];
-static uint8_t 		oldest_rpi 		= 0;
-static uint8_t 		newest_rpi 		= RPI_N - 1;
+static struct bd_s bd_list[BD_N];
+static uint8_t 		oldest_bd 		= 0;
+static uint8_t 		newest_bd 		= BD_N - 1;
 
-static void rpi_list_init(void) {
-	struct rpi_s *rpi = rpi_list;
+static void bd_list_init(void) {
+	struct bd_s *bd = bd_list;
 	int i;
 	
 	/* initialize linked list for aging */
-	for(i=0; i<RPI_N; i++,rpi++) {
-		rpi->older = (i-1)&UINT8_MAX;
-		rpi->newer = i+1;
-		rpi->short_rpi = i;
-		rpi->age = UINT8_MAX;
+	for(i=0; i<BD_N; i++,bd++) {
+		bd->older = (i-1)&UINT8_MAX;
+		bd->newer = i+1;
+		bd->short_id = i;
+		bd->age = UINT8_MAX;
 	}
 }
 
@@ -118,23 +118,23 @@ static uint8_t scale_rssi(int8_t rssi) {
 }
 
 /* smoothly fade out aged RPIs :) */
-static uint8_t calc_brightness(const rpi_s *rpi, unsigned long now) {
-	uint8_t fadeout = RPI_DEVICE_NON_APPLE(rpi) ? age_fadeout_non_apple : age_fadeout;
-	uint8_t val, age = rpi->age;
+static uint8_t calc_brightness(const bd_s *bd, unsigned long now) {
+	uint8_t fadeout = BD_RPI_NON_APPLE(bd) ? rpi_age_fadeout_non_apple : bd_age_fadeout;
+	uint8_t val, age = bd->age;
 
 	if(age >= fadeout)
 		return 0;
 
-	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(RPI_RSSI(rpi)) : UINT8_MAX;
+	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(BD_RSSI(bd)) : UINT8_MAX;
 
 	/* add ~2Hz on/off blinking for non-apple devices if persistence mode and non-apple visualisation enabled */
-	if((config & CF_PERSISTENCE_EN) && (config & CF_DEVTYPE_VISUALIZE) && (RPI_DEVICE_NON_APPLE(rpi)) && (now&0x100))
+	if((config & CF_PERSISTENCE_EN) && (config & CF_DEVTYPE_VISUALIZE) && (BD_RPI_NON_APPLE(bd)) && (now&0x100))
 		return 0;
 
 	if(config & CF_FADEOUT_EN) {
 		uint32_t v32 = val;
-		v32 *= RPI_AGE_TIMEOUT-age;
-		v32 /= RPI_AGE_TIMEOUT;
+		v32 *= BD_AGE_TIMEOUT-age;
+		v32 /= BD_AGE_TIMEOUT;
 		val = v32;
 	}
 	return GAMMA_CORRECT(val);
@@ -151,110 +151,110 @@ static void update_display(void) {
 		is31fl3738_update();
 }
 
-static uint8_t refresh_screen(unsigned long now, uint8_t *non_apple_rpis_active) {
-	struct rpi_s *rpi = rpi_list;
-	uint8_t non_apple_rpis = 0, ids = 0, _strongest_id = UINT8_MAX;
+static uint8_t refresh_screen(unsigned long now, uint8_t *rpis_non_apple_active) {
+	struct bd_s *bd = bd_list;
+	uint8_t rpis_non_apple = 0, bds = 0, _strongest_bd = UINT8_MAX;
 	int8_t rssi, best_rssi = INT8_MIN;
 	uint16_t x,y;
 	
 	for(y=0;y<5;y++) {
-		for(x=0;x<5;x++,rpi++) {
+		for(x=0;x<5;x++,bd++) {
 			
-			/* ignore dead RPIs */
-			if(rpi->age > RPI_AGE_TIMEOUT)
+			/* ignore dead entries */
+			if(bd->age > BD_AGE_TIMEOUT)
 				continue;
 
-			/* update active RPIs counter */
-			ids++;
-			non_apple_rpis += RPI_DEVICE_NON_APPLE(rpi);
+			/* update active counters */
+			bds++;
+			rpis_non_apple += BD_RPI_NON_APPLE(bd);
 
-			rpi->age++;
+			bd->age++;
 
-			set_pixel(x,y,calc_brightness(rpi, now));
+			set_pixel(x,y,calc_brightness(bd, now));
 
-			/* find RPI with highest RSSI */
-			rssi = RPI_RSSI(rpi);
+			/* find BD with highest RSSI */
+			rssi = BD_RSSI(bd);
 			if(rssi>best_rssi) {
 				best_rssi = rssi;
-				_strongest_id = rpi - rpi_list;
+				_strongest_bd = bd - bd_list;
 			}
 		}
 	}
 
 	update_display();
 
-	strongest_id = _strongest_id;
+	strongest_bd = _strongest_bd;
 
-	if(non_apple_rpis_active)
-		*non_apple_rpis_active = non_apple_rpis;
+	if(rpis_non_apple_active)
+		*rpis_non_apple_active = rpis_non_apple;
 
-	return ids;
+	return bds;
 }
 
-static uint8_t seen(uint16_t short_rpi, int8_t rssi, uint8_t non_apple) {
-	struct rpi_s *rpi = rpi_list;
+static uint8_t seen(uint16_t short_id, int8_t rssi, uint8_t dev_type) {
+	struct bd_s *bd = bd_list;
 	uint16_t x,y;
 	int idx;
 	
-	/* try to find rpi in list */
-	for(idx=0;(rpi->short_rpi != short_rpi) && (idx<RPI_N);idx++,rpi++) { }
+	/* try to find bd in list */
+	for(idx=0;(bd->short_id != short_id) && (idx<BD_N);idx++,bd++) { }
 	
-	/* allocate rpi if not seen yet */
-	if(idx == RPI_N) {
+	/* allocate bd if not seen yet */
+	if(idx == BD_N) {
 
-		/* prepare to reclaim oldest RPI entry */
-		idx = oldest_rpi;
-		rpi = rpi_list + idx;
+		/* prepare to reclaim oldest BD entry */
+		idx = oldest_bd;
+		bd = bd_list + idx;
 
-		/* thrashing prevention: only reclaim oldest entry if RPI no longer active
-		 * However, without this blinking is more 'agitated' in situations with lots of RPIs.
+		/* thrashing prevention: only reclaim oldest entry if BD no longer active
+		 * However, without this blinking is more 'agitated' in situations with lots of devices.
 		 * I think this is a more suitable visualisation for these cases.
 		 * Therefore this thrashing prevention is disabled for now. */
 		/*
-		if(rpi->age <= RPI_AGE_TIMEOUT)
+		if(bd->age <= BD_AGE_TIMEOUT)
 			return 0;
 		*/
 
-		/* claim & reassign RPI entry */
-		rpi->short_rpi = short_rpi;
+		/* claim & reassign BD entry */
+		bd->short_id = short_id;
 
-		/* prevent inaccurate huge seen counter readings if more than RPI_N active RPIs are seen */
+		/* prevent inaccurate huge seen counter readings if more than BD_N active BDs are seen */
 		if(!thrashing_likely) {
-			ids_seen++;
-			non_apple_rpis_seen += non_apple;
+			bds_seen++;
+			rpis_non_apple_seen += dev_type;
 		}
 	}
 	
-	/* nothing to do if already newest rpi */
-	if(idx != newest_rpi) {
+	/* nothing to do if already newest bd */
+	if(idx != newest_bd) {
 		
 		/* remove from chain */
-		rpi_list[rpi->newer].older = rpi->older;
-		if(idx == oldest_rpi)
-			oldest_rpi = rpi->newer;
+		bd_list[bd->newer].older = bd->older;
+		if(idx == oldest_bd)
+			oldest_bd = bd->newer;
 		else
-			rpi_list[rpi->older].newer = rpi->newer;
+			bd_list[bd->older].newer = bd->newer;
 
-		/* assign as newest rpi */
-		rpi->newer = rpi_list[newest_rpi].newer;
-		rpi_list[newest_rpi].newer = idx;
-		rpi->older = newest_rpi;
-		newest_rpi = idx;
+		/* assign as newest bd */
+		bd->newer = bd_list[newest_bd].newer;
+		bd_list[newest_bd].newer = idx;
+		bd->older = newest_bd;
+		newest_bd = idx;
 	}
 
 	if(rssi == INT8_MIN)
 		return 0;
 
 	rssi = MIN(rssi, -1); /* clamp to -1 (negative numbers only) */
-	rpi->devtype_rssi = (non_apple<<7)|(rssi&0x7f);
+	bd->devtype_rssi = (dev_type<<7)|(rssi&0x7f);
 
-	rpi->age = 0;
+	bd->age = 0;
 
 	y = idx/5;
 	x = idx%5;
-	set_pixel(x,y,calc_brightness(rpi, uBit.systemTime()));
+	set_pixel(x,y,calc_brightness(bd, uBit.systemTime()));
 
-	return idx == strongest_id;
+	return idx == strongest_bd;
 }
 
 static uint8_t nibble2hex(uint8_t n) {
@@ -324,7 +324,7 @@ static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, const uint8_t 
  */
 static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer_addr, int adv_flags) {
 	uint16_t short_rpi = (rpi_aem[0]<<8)|rpi_aem[1];
-	uint8_t non_apple = (RAND_BDADDR_TYPE(peer_addr) != RAND_BDADDR_NONRESOLVABLE) || (adv_flags != APPLE_FLAGS);
+	uint8_t non_apple = (RAND_BDADDR_TYPE(peer_addr) != RAND_BDADDR_NONRESOLVABLE) || (adv_flags != RPI_APPLE_FLAGS);
 	uint8_t is_strongest = seen(short_rpi, rssi, non_apple);
 	
 	audio_request += (is_strongest ^ 1);
@@ -399,10 +399,10 @@ static void visual_mode_change(uint8_t inc) {
 		config &= ~CF_FADEOUT_EN;
 	
 	/* short blinks vs. inactive after 2 seconds */
-	age_fadeout_non_apple = age_fadeout = (mode&1) ? 5 : RPI_AGE_TIMEOUT;
+	rpi_age_fadeout_non_apple = bd_age_fadeout = (mode&1) ? 5 : BD_AGE_TIMEOUT;
 	if(config & CF_DEVTYPE_VISUALIZE) {
-		age_fadeout_non_apple = (mode&1) ? 2 : RPI_AGE_TIMEOUT; /* make non-Apple blinks shorter */
-		age_fadeout = (mode&1) ? 7 : RPI_AGE_TIMEOUT; /* make other blinks longer */
+		rpi_age_fadeout_non_apple = (mode&1) ? 2 : BD_AGE_TIMEOUT; /* make non-Apple blinks shorter */
+		bd_age_fadeout = (mode&1) ? 7 : BD_AGE_TIMEOUT; /* make other blinks longer */
 	}
 	
 	/* persistence flag */
@@ -474,13 +474,13 @@ static void button_service(void) {
 }
 
 static void randomize_age(void) {
-	uint32_t set=(1<<RPI_N)-1;
+	uint32_t set=(1<<BD_N)-1;
 	uBit.seedRandom();
 	while(set) {
-		uint32_t v = uBit.random(RPI_N);
+		uint32_t v = uBit.random(BD_N);
 		if(set&(1<<v)) {
 			set &= ~(1<<v);
-			seen(v, INT8_MIN, 0); /* short_rpis must be preinitialized to 0..RPI_N or read from NULL ptr will be triggered! */
+			seen(v, INT8_MIN, 0); /* short_ids must be preinitialized to 0..BD_N or read from NULL ptr will be triggered! */
 		}
 	}
 }
@@ -563,14 +563,14 @@ static void hw_detect(void) {
 int main() {
 	uint32_t now = uBit.systemTime();
 	uint32_t last_cntprint = now;
-	uint8_t ids_active, non_apple_rpis_active;
+	uint8_t bds_active, rpis_non_apple_active;
 	uint8_t audio_done = 0, sleep_time = REFRESH_DELAY;
 
 	hw_detect();
 
 	uBit.serial.setTxBufferSize(UART_TXBUFSZ);
 
-	rpi_list_init();
+	bd_list_init();
 
 	if(BTN_A_PRESSED())
 		config |= CF_ALLBLE_EN;
@@ -610,24 +610,24 @@ int main() {
 
 		button_service();
 
-		ids_active = refresh_screen(now, &non_apple_rpis_active);
+		bds_active = refresh_screen(now, &rpis_non_apple_active);
 
-		/* prevent inaccurate huge seen counter readings if more than RPI_N active RPIs are seen */
-		if(ids_active == RPI_N)
+		/* prevent inaccurate huge seen counter readings if more than BD_N active BDs are seen */
+		if(bds_active == BD_N)
 			thrashing_likely = THRASHING_LOCKOUT;
 		else if (thrashing_likely)
 			thrashing_likely--;
 
-		/* output rpi counter every ~8 seconds */
+		/* output bd counter every ~8 seconds */
 		if((last_cntprint != (now>>13)) && (UART_CANQUEUE(84))) {
 			char buf[84];
 			last_cntprint = now>>13;
 			if(config & CF_ALLBLE_EN)
-				sprintf(buf,"IDs active: %s%2d seen: %ld\r\n", ids_active < RPI_N ? "  " : ">=",  ids_active, ids_seen);
+				sprintf(buf,"BDs active: %s%2d seen: %ld\r\n", bds_active < BD_N ? "  " : ">=",  bds_active, bds_seen);
 			else {
 				sprintf(buf,"RPIs active: %s%2d (non-Apple: >=%2d) seen: %ld (non-Apple: >=%ld)\r\n",
-					ids_active < RPI_N ? "  " : ">=",  ids_active, non_apple_rpis_active, 
-					ids_seen, non_apple_rpis_seen);
+					bds_active < BD_N ? "  " : ">=",  bds_active, rpis_non_apple_active, 
+					bds_seen, rpis_non_apple_seen);
 			}
 			uBit.serial.send(buf, ASYNC);
 		}
