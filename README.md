@@ -10,17 +10,23 @@ LEDs indicate received Exposure Notification beacons. There's one LED per Rollin
 
 The number of RPIs seen is output every 10 seconds via the USB serial port.
 
-Press *B* to change visualisation mode:
+Press **B** to change visualisation mode:
  * 0: persistence with fadeout from RSSI				[DEFAULT]
  * 1: blink with RSSI brightness
  * 2: persistence at full brightness
  * 3: blink at full brightness
 
-Press *B* for 3 seconds to toggle Apple/Google visualisation. (Blinking mode: short blinks are Google, longer Apple. Persistence mode: Google blink 2x per second, Apple LEDs are always on.)
+Press **B** for 3 seconds to see all BLE devices, not just COVID-19 Exposure Notifications.
+Press again for 3 seconds to switch back to COVID-19 Exposure Notifications only. 
+When visibility of all BLE devices is enabled LEDs blinking at 2Hz are COVID-19 Exposure Notifications, the rest is other devices.
 
-Press *A* to toggle sound on/off. (Beacons from the device with the strongest signal do not trigger a click.)
+Press **A** to toggle sound output.
+Beacons from the device with the strongest signal do not trigger a click.
+**BBC micro:bit**: connect headphones to **PAD 0** and **GND**.
+**Calliope Mini**: connect headphones to **PAD 1** and **GND**.
+You can also use the builtin speaker of the Calliope Mini: Pressing **A** the first time enables headphones output, pressing **A** again switches to speaker output, a third press turns sound output off again.
 
-Press *A* for 3 seconds to see all received Exposure Notifications via the USB serial port (format is RPI, AEM, RSSI). Press again for 3 seconds to disable.
+Press **A** for 3 seconds to see received Data via the USB serial port. Press again for 3 seconds to disable.
 
 ## How to Build
 This project uses yotta to build, not pxt.
