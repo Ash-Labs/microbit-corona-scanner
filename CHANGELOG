@@ -1,3 +1,13 @@
+v0.6:
+- Calliope Mini: proper support for Calliope Mini (buttons and audio speaker)
+- general: better behavior in situations with 25 or more active devices - prevent faulty counters
+- general: external LED matrix support via IS31FL3738 (autodetection via I2C bus)
+- general: Apple/Google distinction removed for good
+- general: support for optional visualisation of ALL active BLE devices - not just COVID-19 Exposure Notification
+- general: prevent a tiny glitch every 49.7 days when the system timer rolls over
+- serial: support for output of raw BLE advertisement data if user enables 'ALL BLE' mode
+- serial: improved prevention of garbled lines due to a full txbuffer
+
 v0.5.1:
 - general: BUGFIX for number of active Apple RPIs
 
