@@ -19,7 +19,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.6-dev9"
+#define VERSION_STRING	"v0.6-dev10"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -189,14 +189,14 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *rpis_active) {
 	return bds;
 }
 
-static uint8_t seen(uint16_t short_id, int8_t rssi, uint8_t type) {
+static uint8_t seen(const uint8_t *id_data, int8_t rssi, uint8_t type) {
 	struct bd_s *bd = bd_list;
-	uint16_t x,y;
+	uint16_t x, y, short_id = (id_data[1]<<8)|id_data[0];
 	int idx;
-	
+
 	/* try to find bd in list */
 	for(idx=0;(bd->short_id != short_id) && (idx<BD_N);idx++,bd++) { }
-	
+
 	/* allocate bd if not seen yet */
 	if(idx == BD_N) {
 
@@ -321,22 +321,15 @@ static void exposure_to_uart(const uint8_t *rpi_aem, int8_t rssi, const uint8_t 
  * ~8m distance + 2x wall: -98
  */
 
-static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer_addr, int adv_flags) {
-	uint16_t short_rpi = (rpi_aem[0]<<8)|rpi_aem[1];
-	uint8_t is_strongest = seen(short_rpi, rssi, 1);
-	
-	audio_request += (is_strongest ^ 1);
-	
-	if((config & CF_UART_EN) && (!(config & CF_ALLBLE_EN)))
-		exposure_to_uart(rpi_aem, rssi, peer_addr, adv_flags, is_strongest);
-}
-
 /* see https://os.mbed.com/docs/mbed-os/v5.15/mbed-os-api-doxy/struct_gap_1_1_advertisement_callback_params__t.html */
 void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
     uint8_t len = params->advertisingDataLen;
 	const uint8_t *p = params->advertisingData;
+	const uint8_t *peer_addr = params->peerAddr;
 	const int8_t rssi = params->rssi; /* use for LED brightness */
-	int adv_flags = -1;
+	const uint8_t *id_data;
+	uint8_t is_strongest = 0;
+	int exposure_notification, adv_flags = -1;
 	
 	/* match Exposure Notification Service Class UUID 0xFD6F 
 	 * 
@@ -347,17 +340,30 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	 * 17 16 6ffd 660a6af67f7e946b3c3ce253dae9b411 78b0e9c2 (rpi, aem)
 	 * */
 
-	if((config & CF_ALLBLE_EN) && (config & CF_UART_EN))
-		raw_to_uart(p, len, params->peerAddr, rssi);
-
+	/* flags section present? */
 	if((len >= 31) && (p[0] == 2) && (p[1] == 1)) {
 		adv_flags = p[2];
 		p+=3;
 		len-=3;
 	}
 
-	if((len >= 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd))
-		exposure_rx(p+8, rssi, params->peerAddr, adv_flags);
+	/* figure out if this is a COVID-19 Exposure Notification */
+	exposure_notification = (len >= 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd);
+	id_data = exposure_notification ? p+8 : peer_addr;
+
+	/* keep track of this BD if Exposure Notification or unfiltered BLE mode enabled */
+	if(exposure_notification || (config & CF_ALLBLE_EN)) {
+		is_strongest = seen(id_data, rssi, exposure_notification);
+		audio_request += (is_strongest ^ 1);
+	}
+
+	/* forward via UART if enabled */
+	if(config & CF_UART_EN) {
+		if(config & CF_ALLBLE_EN)
+			raw_to_uart(params->advertisingData, params->advertisingDataLen, peer_addr, rssi);
+		else
+			exposure_to_uart(p+8, rssi, peer_addr, adv_flags, is_strongest);
+	}
 }
 
 static void audio_mode_change(void) {
@@ -475,10 +481,10 @@ static void randomize_age(void) {
 	uint32_t set=(1<<BD_N)-1;
 	uBit.seedRandom();
 	while(set) {
-		uint32_t v = uBit.random(BD_N);
+		uint16_t v = uBit.random(BD_N);
 		if(set&(1<<v)) {
 			set &= ~(1<<v);
-			seen(v, INT8_MIN, 0); /* short_ids must be preinitialized to 0..BD_N or read from NULL ptr will be triggered! */
+			seen((uint8_t*)&v, INT8_MIN, 0); /* short_ids must be preinitialized to 0..BD_N or read from NULL ptr will be triggered! */
 		}
 	}
 }
@@ -549,6 +555,7 @@ static void hw_detect(void) {
 
 /* TODO:
  * 
+ * - think about counters in unfiltered vs. filtered BLE mode
  * - handle uBit.systemTime() overflow
  * 
  * further thoughts:
