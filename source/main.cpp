@@ -351,21 +351,25 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 
 	/* figure out if this is a COVID-19 Exposure Notification */
 	exposure_notification = (len >= 28) && (p[0] == 3) && (p[1] == 3) && (p[2] == 0x6f) && (p[3] == 0xfd);
+
+	/* drop data unless exposure notification or CF_ALLBLE_EN */
+	if((!exposure_notification) && (!(config & CF_ALLBLE_EN)))
+		return;
+
 	id_data = exposure_notification ? p+8 : peer_addr;
 
 	/* keep track of this BD if Exposure Notification or unfiltered BLE mode enabled */
-	if(exposure_notification || (config & CF_ALLBLE_EN)) {
-		is_strongest = seen(id_data, rssi, exposure_notification);
-		audio_request += (is_strongest ^ 1);
-	}
+	is_strongest = seen(id_data, rssi, exposure_notification);
+	audio_request += (is_strongest ^ 1);
 
 	/* forward via UART if enabled */
-	if(config & CF_UART_EN) {
-		if(config & CF_ALLBLE_EN)
-			raw_to_uart(params->advertisingData, params->advertisingDataLen, peer_addr, rssi);
-		else
-			exposure_to_uart(p+8, rssi, peer_addr, adv_flags, is_strongest);
-	}
+	if(!(config & CF_UART_EN))
+		return;
+
+	if(config & CF_ALLBLE_EN)
+		raw_to_uart(params->advertisingData, params->advertisingDataLen, peer_addr, rssi);
+	else
+		exposure_to_uart(id_data, rssi, peer_addr, adv_flags, is_strongest);
 }
 
 static void audio_mode_change(void) {
