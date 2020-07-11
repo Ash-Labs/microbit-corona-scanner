@@ -500,17 +500,18 @@ static void randomize_age(void) {
  * case 2: end  pre-rollover, ts post-rollover: ts << end
  */
 static uint32_t wait_until(uint32_t end) {
-	uint32_t ts = uBit.systemTime(), delta = end - ts;  /* calculate waiting time - normal case */
+	uint32_t ts = uBit.systemTime();
+	uint32_t delta = end - ts;        /* calculate waiting time - normal case */
 
-	if(ts >= end) {              /* too late - unless rollover happened */
+	if(ts >= end) {                   /* too late - unless rollover happened */
 		delta = ts - end;
-		if(delta < (1U<<31))     /* no rollover, but too late - no time to wait */
+		if(delta < (1U<<31))          /* no rollover, but too late - no time to wait */
 			return ts;
 		/* rollover case 1: ts pre-rollover, end post-rollover - fix delta calculation */
 		delta = 0xffffffff - ts;
 		delta += end+1;
 	}
-	else if (delta > (1U<<31))   /* rollover case 2? no time to wait then b/c ts is past end */
+	else if (delta > (1U<<31))        /* rollover case 2? no time to wait then b/c ts is past end */
 		return ts;
 
 	uBit.sleep(delta);
