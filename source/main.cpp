@@ -21,7 +21,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.6-dev10"
+#define VERSION_STRING	"v0.6-rc1"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -495,24 +495,26 @@ static void randomize_age(void) {
 	}
 }
 
-/* TODO: handle rollover
- * case 1: end & ts1 pre-rollover              : no problem
- * case 2: end & ts1 post-rollover             : no problem
- * case 3: end post-rollover, ts1 pre-rollover : ts1 > end
- * case 4: end pre-rollover , ts1 post-rollover: ts1 < end
+/* uint32 timer rollover cases:
+ * case 1: end post-rollover, ts  pre-rollover: ts >> end
+ * case 2: end  pre-rollover, ts post-rollover: ts << end
  */
 static uint32_t wait_until(uint32_t end) {
-	uint32_t ts1 = uBit.systemTime(), ts2;
-	if(ts1 >= end)
-		return ts1;
-	uBit.sleep(end-ts1);
-	ts2 = uBit.systemTime();
-	/*
-	char buf[32];
-	sprintf(buf,"wait %ld\r\n",end-ts1);
-	uBit.serial.send(buf,ASYNC);
-	*/
-	return ts2;
+	uint32_t ts = uBit.systemTime(), delta = end - ts;  /* calculate waiting time - normal case */
+
+	if(ts >= end) {              /* too late - unless rollover happened */
+		delta = ts - end;
+		if(delta < (1U<<31))     /* no rollover, but too late - no time to wait */
+			return ts;
+		/* rollover case 1: ts pre-rollover, end post-rollover - fix delta calculation */
+		delta = 0xffffffff - ts;
+		delta += end+1;
+	}
+	else if (delta > (1U<<31))   /* rollover case 2? no time to wait then b/c ts is past end */
+		return ts;
+
+	uBit.sleep(delta);
+	return uBit.systemTime();
 }
 
 /* micro:bit:
@@ -566,8 +568,6 @@ static void hw_detect(void) {
 }
 
 /* TODO:
- * 
- * - handle uBit.systemTime() overflow
  * 
  * further thoughts:
  * - better parser for advertisement data?
