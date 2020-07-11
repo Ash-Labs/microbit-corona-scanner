@@ -3,7 +3,7 @@
 
 /* config bits */
 #define CF_UART_EN					(1<<0)	 /* enable USB serial RPI output */
-#define CF_UART_RAW_EN				(1<<1)   /* enable unfiltered beacon output */
+#define CF_ALLBLE_EN				(1<<1)   /* enable unfiltered beacon output */
 
 #define CF_RSSI_BRIGHTNESS			(1<<2)	 /* use RSSI for LED brightness 	*/
 #define CF_PERSISTENCE_EN			(1<<3)	 /* persistence visualisation 	*/

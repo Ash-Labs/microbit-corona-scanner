@@ -19,7 +19,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.6-dev8"
+#define VERSION_STRING	"v0.6-dev9"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -41,11 +41,11 @@ enum {
 MicroBit uBit;
 MicroBitI2C *i2c_bus                = &uBit.i2c;
 
-static uint32_t rpis_seen           = 0; /* includes apple */
+static uint32_t ids_seen            = 0;
 static uint32_t non_apple_rpis_seen = 0;
 
 static uint8_t audio_request        = 0;
-static uint8_t strongest_rpi        = UINT8_MAX;
+static uint8_t strongest_id         = UINT8_MAX;
 
 #define MIN_RSSI					(-98)
 #define MAX_RSSI					(-56)
@@ -153,7 +153,7 @@ static void update_display(void) {
 
 static uint8_t refresh_screen(unsigned long now, uint8_t *non_apple_rpis_active) {
 	struct rpi_s *rpi = rpi_list;
-	uint8_t non_apple_rpis = 0, rpis = 0, _strongest_rpi = UINT8_MAX;
+	uint8_t non_apple_rpis = 0, ids = 0, _strongest_id = UINT8_MAX;
 	int8_t rssi, best_rssi = INT8_MIN;
 	uint16_t x,y;
 	
@@ -165,7 +165,7 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *non_apple_rpis_active)
 				continue;
 
 			/* update active RPIs counter */
-			rpis++;
+			ids++;
 			non_apple_rpis += RPI_DEVICE_NON_APPLE(rpi);
 
 			rpi->age++;
@@ -176,19 +176,19 @@ static uint8_t refresh_screen(unsigned long now, uint8_t *non_apple_rpis_active)
 			rssi = RPI_RSSI(rpi);
 			if(rssi>best_rssi) {
 				best_rssi = rssi;
-				_strongest_rpi = rpi - rpi_list;
+				_strongest_id = rpi - rpi_list;
 			}
 		}
 	}
 
 	update_display();
 
-	strongest_rpi = _strongest_rpi;
+	strongest_id = _strongest_id;
 
 	if(non_apple_rpis_active)
 		*non_apple_rpis_active = non_apple_rpis;
 
-	return rpis;
+	return ids;
 }
 
 static uint8_t seen(uint16_t short_rpi, int8_t rssi, uint8_t non_apple) {
@@ -220,7 +220,7 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, uint8_t non_apple) {
 
 		/* prevent inaccurate huge seen counter readings if more than RPI_N active RPIs are seen */
 		if(!thrashing_likely) {
-			rpis_seen++;
+			ids_seen++;
 			non_apple_rpis_seen += non_apple;
 		}
 	}
@@ -254,7 +254,7 @@ static uint8_t seen(uint16_t short_rpi, int8_t rssi, uint8_t non_apple) {
 	x = idx%5;
 	set_pixel(x,y,calc_brightness(rpi, uBit.systemTime()));
 
-	return idx == strongest_rpi;
+	return idx == strongest_id;
 }
 
 static uint8_t nibble2hex(uint8_t n) {
@@ -329,7 +329,7 @@ static void exposure_rx(const uint8_t *rpi_aem, int8_t rssi, const uint8_t *peer
 	
 	audio_request += (is_strongest ^ 1);
 	
-	if((config & CF_UART_EN) && (!(config & CF_UART_RAW_EN)))
+	if((config & CF_UART_EN) && (!(config & CF_ALLBLE_EN)))
 		exposure_to_uart(rpi_aem, rssi, peer_addr, adv_flags, is_strongest);
 }
 
@@ -349,7 +349,7 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	 * 17 16 6ffd 660a6af67f7e946b3c3ce253dae9b411 78b0e9c2 (rpi, aem)
 	 * */
 
-	if((config & CF_UART_RAW_EN) && (config & CF_UART_EN))
+	if((config & CF_ALLBLE_EN) && (config & CF_UART_EN))
 		raw_to_uart(p, len, params->peerAddr, rssi);
 
 	if((len >= 31) && (p[0] == 2) && (p[1] == 1)) {
@@ -563,7 +563,7 @@ static void hw_detect(void) {
 int main() {
 	uint32_t now = uBit.systemTime();
 	uint32_t last_cntprint = now;
-	uint8_t rpis_active, non_apple_rpis_active;
+	uint8_t ids_active, non_apple_rpis_active;
 	uint8_t audio_done = 0, sleep_time = REFRESH_DELAY;
 
 	hw_detect();
@@ -573,7 +573,7 @@ int main() {
 	rpi_list_init();
 
 	if(BTN_A_PRESSED())
-		config |= CF_UART_RAW_EN | CF_UART_EN;
+		config |= CF_ALLBLE_EN;
 
 	if(!BTN_B_PRESSED())
 		randomize_age();
@@ -610,10 +610,10 @@ int main() {
 
 		button_service();
 
-		rpis_active = refresh_screen(now, &non_apple_rpis_active);
+		ids_active = refresh_screen(now, &non_apple_rpis_active);
 
 		/* prevent inaccurate huge seen counter readings if more than RPI_N active RPIs are seen */
-		if(rpis_active == RPI_N)
+		if(ids_active == RPI_N)
 			thrashing_likely = THRASHING_LOCKOUT;
 		else if (thrashing_likely)
 			thrashing_likely--;
@@ -622,9 +622,13 @@ int main() {
 		if((last_cntprint != (now>>13)) && (UART_CANQUEUE(84))) {
 			char buf[84];
 			last_cntprint = now>>13;
-			sprintf(buf,"RPIs active: %s%2d (non-Apple: >=%2d) seen: %ld (non-Apple: >=%ld)\r\n",
-				rpis_active < RPI_N ? "  " : ">=",  rpis_active, non_apple_rpis_active, 
-				rpis_seen, non_apple_rpis_seen);
+			if(config & CF_ALLBLE_EN)
+				sprintf(buf,"IDs active: %s%2d seen: %ld\r\n", ids_active < RPI_N ? "  " : ">=",  ids_active, ids_seen);
+			else {
+				sprintf(buf,"RPIs active: %s%2d (non-Apple: >=%2d) seen: %ld (non-Apple: >=%ld)\r\n",
+					ids_active < RPI_N ? "  " : ">=",  ids_active, non_apple_rpis_active, 
+					ids_seen, non_apple_rpis_seen);
+			}
 			uBit.serial.send(buf, ASYNC);
 		}
 
