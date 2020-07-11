@@ -128,7 +128,7 @@ static uint8_t calc_brightness(const bd_s *bd, unsigned long now) {
 	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(BD_RSSI(bd)) : UINT8_MAX;
 
 	/* add ~2Hz on/off blinking for exposure notifications if persistence mode and ALLBLE enabled */
-	if((config & CF_PERSISTENCE_EN) && (config & CF_ALLBLE_EN) && (BD_TYPE_RPI(bd)) && (now&0x100))
+	if((config & CF_PERSISTENCE_EN) && (config & CF_ALLBLE_EN) && (!(config & CF_RPIS_DONTBLINK)) && (BD_TYPE_RPI(bd)) && (now&0x100))
 		return 0;
 
 	if(config & CF_FADEOUT_EN) {
@@ -588,8 +588,11 @@ int main() {
 
 	bd_list_init();
 
-	if(!BTN_B_PRESSED())
+	if(!BTN_A_PRESSED())
 		randomize_age();
+
+	if(BTN_B_PRESSED())
+		config |= CF_RPIS_DONTBLINK;
 
 	visual_mode_change(0);
 
