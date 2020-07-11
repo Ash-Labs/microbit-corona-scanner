@@ -6,6 +6,8 @@
 #include "is31fl3738.h"
 #include "audio.h"
 
+#include <inttypes.h>
+
 #if YOTTA_CFG_MICROBIT_S130 != 1
 #error This code *only* works with the Nordic S130 softdevice
 #endif
@@ -489,6 +491,12 @@ static void randomize_age(void) {
 	}
 }
 
+/* TODO: handle rollover
+ * case 1: end & ts1 pre-rollover              : no problem
+ * case 2: end & ts1 post-rollover             : no problem
+ * case 3: end post-rollover, ts1 pre-rollover : ts1 > end
+ * case 4: end pre-rollover , ts1 post-rollover: ts1 < end
+ */
 static uint32_t wait_until(uint32_t end) {
 	uint32_t ts1 = uBit.systemTime(), ts2;
 	if(ts1 >= end)
@@ -555,7 +563,6 @@ static void hw_detect(void) {
 
 /* TODO:
  * 
- * - think about counters in unfiltered vs. filtered BLE mode
  * - handle uBit.systemTime() overflow
  * 
  * further thoughts:
@@ -567,7 +574,7 @@ static void hw_detect(void) {
  */
 int main() {
 	uint32_t now = uBit.systemTime();
-	uint32_t last_cntprint = now;
+	uint32_t last_cntprint = 0;
 	uint8_t bds_active, rpis_active;
 	uint8_t audio_done = 0, sleep_time = REFRESH_DELAY;
 
@@ -622,12 +629,16 @@ int main() {
 
 		/* output bd counter every ~8 seconds */
 		if((last_cntprint != (now>>13)) && (UART_CANQUEUE(84))) {
-			char buf[84];
+			char buf[70];
 			last_cntprint = now>>13;
-			if(config & CF_ALLBLE_EN)
-				sprintf(buf," BDs active: %s%2d seen: %ld\r\n", bds_active < BD_N ? "  " : ">=",  bds_active, bds_seen);
-			else
-				sprintf(buf,"RPIs active: %s%2d seen: %ld\r\n", rpis_active < BD_N ? "  " : ">=",  rpis_active, rpis_seen);
+			if(!(config & CF_ALLBLE_EN))
+				sprintf(buf,"RPIs active: %s%2d seen: %" PRIu32 "\r\n", thrashing_likely ? ">=" : "",  rpis_active, rpis_seen);
+			else {
+				sprintf(buf,"BDs active: %s%2d (RPIs: %s%2d) seen: %" PRIu32 " (RPIs: %" PRIu32 ")\r\n",
+					thrashing_likely ? ">=" : "",  bds_active,
+					thrashing_likely ? ">=" : "",  rpis_active,
+					bds_seen, rpis_seen);
+			}
 			uBit.serial.send(buf, ASYNC);
 		}
 
