@@ -1,14 +1,21 @@
 # microbit-corona-scanner
-
 The micro:bit finds BLE Beacons according to the Google/Apple COVID-19 Exposure Notification specification (https://www.blog.google/documents/70/Exposure_Notification_-_Bluetooth_Specification_v1.2.2.pdf)
+
+LEDs indicate received Exposure Notification beacons (or BLE devices - see below).<br/>
+There's one LED per Rolling Proximity Identifier (RPI) so up to 25 active RPIs with all 25 LEDs.
 
 ## Video
 [![usage video](https://img.youtube.com/vi/39K_UgLI7oA/0.jpg)](https://www.youtube.com/watch?v=39K_UgLI7oA)
 
-## What does it do?
-LEDs indicate received Exposure Notification beacons (or BLE devices - see below).<br/>
-There's one LED per Rolling Proximity Identifier (RPI) so up to 25 active RPIs with all 25 LEDs.
+## Usage
+### BBC micro:bit
+![microbit](https://raw.githubusercontent.com/znuh/microbit-corona-scanner/master/docs/microbit_en.png)
+### BBC micro:bit (german)
+![microbit](https://raw.githubusercontent.com/znuh/microbit-corona-scanner/master/docs/microbit.png)
+### Calliope Mini (german)
+![microbit](https://raw.githubusercontent.com/znuh/microbit-corona-scanner/master/docs/microbit.png)
 
+### Text description
 The number of devices is output every ~8 seconds via the USB serial port.
 
 Press **B** to change **visualisation mode**:
