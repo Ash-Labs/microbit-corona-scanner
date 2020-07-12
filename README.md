@@ -13,7 +13,7 @@ There's one LED per Rolling Proximity Identifier (RPI) so up to 25 active RPIs w
 ### BBC micro:bit (german)
 ![microbit](https://raw.githubusercontent.com/znuh/microbit-corona-scanner/master/docs/microbit.png)
 ### Calliope Mini (german)
-![microbit](https://raw.githubusercontent.com/znuh/microbit-corona-scanner/master/docs/microbit.png)
+![calliope](https://raw.githubusercontent.com/znuh/microbit-corona-scanner/master/docs/calliope.png)
 
 ### Text description
 The number of devices is output every ~8 seconds via the USB serial port.
