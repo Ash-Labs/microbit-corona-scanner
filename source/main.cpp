@@ -21,7 +21,7 @@ extern "C" {
 uint32_t btle_set_gatt_table_size(uint32_t size);
 }
 
-#define VERSION_STRING	"v0.6"
+#define VERSION_STRING	"v0.6.1-dev1"
 
 static const uint8_t gamma_lut[] __attribute__ ((aligned (4))) = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0b,0x0d,0x0f,0x11,0x13,0x16,
@@ -212,7 +212,7 @@ static uint8_t seen(const uint8_t *id_data, int8_t rssi, uint8_t type) {
 		 * Therefore this thrashing prevention is disabled for now. */
 		/*
 		if(bd->age <= BD_AGE_TIMEOUT)
-			return 0;
+			return UINT8_MAX;
 		*/
 
 		/* claim & reassign BD entry */
@@ -254,7 +254,7 @@ static uint8_t seen(const uint8_t *id_data, int8_t rssi, uint8_t type) {
 	x = idx%5;
 	set_pixel(x,y,calc_brightness(bd, uBit.systemTime()));
 
-	return idx == strongest_bd;
+	return idx;
 }
 
 static uint8_t nibble2hex(uint8_t n) {
@@ -330,7 +330,7 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	const uint8_t *peer_addr = params->peerAddr;
 	const int8_t rssi = params->rssi; /* use for LED brightness */
 	const uint8_t *id_data;
-	uint8_t is_strongest = 0;
+	uint8_t led_idx = 0, is_strongest = 0;
 	int exposure_notification, adv_flags = -1;
 	
 	/* match Exposure Notification Service Class UUID 0xFD6F 
@@ -359,7 +359,8 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 	id_data = exposure_notification ? p+8 : peer_addr;
 
 	/* keep track of this BD if Exposure Notification or unfiltered BLE mode enabled */
-	is_strongest = seen(id_data, rssi, exposure_notification);
+	led_idx = seen(id_data, rssi, exposure_notification);
+	is_strongest = led_idx == strongest_bd;
 	audio_request += (is_strongest ^ 1);
 
 	/* forward via UART if enabled */
