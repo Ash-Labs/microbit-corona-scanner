@@ -271,13 +271,15 @@ static char *tohex(char *dst, const uint8_t *src, uint32_t n) {
 	return dst;
 }
 
-static void raw_to_uart(const uint8_t *d, uint8_t len, const uint8_t *paddr, int8_t rssi) {
+static void raw_to_uart(const uint8_t *d, uint8_t len, const uint8_t *paddr, int8_t rssi, uint8_t led_idx) {
 	char buf[128], *p;
 
-	if((len>(sizeof(buf)-21)) || (!UART_CANQUEUE(len*2+21)))
+	if((len>(sizeof(buf)-24)) || (!UART_CANQUEUE(len*2+24)))
 		return;
 
-	p=tohex(buf, paddr, 6);
+	p=tohex(buf, &led_idx, 1);
+	*p=' ';
+	p=tohex(p+1, paddr, 6);
 	*p=' ';
 	p=tohex(p+1, d, len);
 	*p=' ';
@@ -360,6 +362,7 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 
 	/* keep track of this BD if Exposure Notification or unfiltered BLE mode enabled */
 	led_idx = seen(id_data, rssi, exposure_notification);
+
 	is_strongest = led_idx == strongest_bd;
 	audio_request += (is_strongest ^ 1);
 
@@ -368,7 +371,7 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
 		return;
 
 	if(config & CF_ALLBLE_EN)
-		raw_to_uart(params->advertisingData, params->advertisingDataLen, peer_addr, rssi);
+		raw_to_uart(params->advertisingData, params->advertisingDataLen, peer_addr, rssi, led_idx);
 	else
 		exposure_to_uart(id_data, rssi, peer_addr, adv_flags, is_strongest);
 }
