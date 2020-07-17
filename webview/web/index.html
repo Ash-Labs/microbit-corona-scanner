@@ -1,0 +1,45 @@
+<!DOCTYPE HTML>
+<html lang="en">
+   <head>
+      <meta charset="UTF-8">
+      <title>Blinkenlights analyzer</title>
+      <link href="mcs-analyzer.css" rel="stylesheet">
+      <script src="ble_numbers.js"></script>
+      <script src="mcs-analyzer.js"></script>		
+   </head>
+   <body>
+      <textarea style="overflow: hidden;" id="message" rows="10" cols="100" readonly>
+		  * USB serial output must be enabled (press A for 3 seconds)
+		  * ALLBLE-mode must be enabled (press B for 3 seconds)
+	  </textarea>
+      </br>
+      <div id = 'info'>&nbsp;</div>
+      <hr style="width:50%;text-align:left;margin-left:0">
+      </br>
+      <table>
+         <tr>
+            <td style="vertical-align:top">
+               <table id='leds'></table>
+               </br>
+            </td>
+            <td>&nbsp;</td>
+            <td style="vertical-align:top" hidden id='adv_td'>
+               <table>
+                  <tr>
+                     <th>BDADDR</th>
+                     <th>&nbsp;</th>
+                     <th>RSSI</th>
+                  </tr>
+                  <tr>
+                     <td id='bdaddr_td'></td>
+                     <td>&nbsp;</td>
+                     <td id='rssi_td'></td>
+                  </tr>
+               </table>
+               <h2>Advertisement data:</h2>
+               <div id = 'adv_info' style = 'white-space: pre;'></div>
+            </td>
+         </tr>
+      </table>
+   </body>
+</html>

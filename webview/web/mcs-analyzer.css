@@ -1,0 +1,27 @@
+a[target="_blank"]:before {
+    font-family: 'FontAwesome';
+    content: " \f08e";
+}
+.strpd_trb:nth-child(odd) {
+	background-color: #f2f2f2;
+	font-weight:bold;
+}
+.strpd_tr:nth-child(odd) {
+	background-color: #f2f2f2;
+}
+#bdaddr_td {
+	width: 120px; 
+}
+.led_td {
+	width: 20px; 
+	height:20px; 
+	cursor: zoom-in;
+	color: #ffffff;
+}
+.led_td_unused {
+	width: 20px; 
+	height:20px; 
+	cursor: zoom-in;
+	color: #000000;
+	background-color: #d0d0d0;
+}
