@@ -15,6 +15,6 @@ then
 		echo "usage: $0 /dev/ttyACMx"
 	fi
 else
-	stty 115200 < $SERIAL_DEVICE
+	stty 115200 -icrnl < $SERIAL_DEVICE
 	cat $SERIAL_DEVICE
 fi

@@ -1,3 +1,7 @@
+v0.6.1:
+- general: added webview tool
+- serial: raw output includes LED index for device
+
 v0.6:
 - Calliope Mini: proper support for Calliope Mini (buttons and audio speaker)
 - general: better behavior in situations with 25 or more active devices - prevent faulty counters
