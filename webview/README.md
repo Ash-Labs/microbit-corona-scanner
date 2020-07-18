@@ -1,6 +1,9 @@
 # webview tool
-With this tool you can have a closer look at the devices lighting up the LEDs.<br/>
-It requires the **websocketd** installed: [https://github.com/joewalnes/websocketd](https://github.com/joewalnes/websocketd)<br/>
+With this tool you can have a closer look at the devices lighting up the LEDs.
+
+It requires the **websocketd** installed: [https://github.com/joewalnes/websocketd](https://github.com/joewalnes/websocketd)
+
+**Linux advice:** Send your **ModemManager** to hell if you haven't done so already. It will interfere with all /dev/ttyACM devices.
 
 ## Usage
 1) ensure the latest firmware version is installed on your micro:bit or Calliope Mini (at least v0.6.1 required)
