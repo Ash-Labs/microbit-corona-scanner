@@ -12,14 +12,14 @@ a[target="_blank"]:before {
 	width: 120px; 
 }
 .led_td {
-	width: 20px; 
-	height:20px; 
+	width: 22px;
+	height:22px;
 	cursor: zoom-in;
 	color: #ffffff;
 }
 .led_td_unused {
-	width: 20px; 
-	height:20px; 
+	width: 22px;
+	height:22px;
 	cursor: zoom-in;
 	color: #000000;
 	background-color: #d0d0d0;
