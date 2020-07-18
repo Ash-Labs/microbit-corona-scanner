@@ -109,14 +109,28 @@ const adv_parser = {
   0xff: manuf_specific,
 };
 
+/* parsing advertisement data isn't done upon reception -
+ * instead parsing is done when the data shall be shown to the user */
 function parse_data(d, parser) {
   let res = '<table>';
   for (let i = 0; i < d.length;) {
+	  let error = false;
+
 	  let len = d[i];
+	  error |= (len == null) || (len < 2);
+	  error |= (i+len+1 > d.length);
+
 	  let type = d[i + 1];
-	  let data = d.slice(i + 2, i + 2 + len - 1);
+	  error |= (type == null);
+
+	  if (error) return 'invalid data';
+
 	  let typename = parser.type_names[type];
-	  typename = (typename != null) ? typename : type;
+	  //typename = (typename != null) ? typename : type;
+	  error |= (typename == null);
+	  if (error) return 'invalid data';
+
+	  let data = d.slice(i + 2, i + 2 + len - 1);
 	  let value_parser = parser[type];
 	  let parsed_data;
 	  res += '<tr class="strpd_trb"><td>' + typename + '</td></tr>';
