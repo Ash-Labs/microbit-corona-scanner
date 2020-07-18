@@ -1,6 +1,5 @@
 a[target="_blank"]:before {
-    font-family: 'FontAwesome';
-    content: " \f08e";
+    content: "⤤";
 }
 .strpd_trb:nth-child(odd) {
 	background-color: #f2f2f2;
