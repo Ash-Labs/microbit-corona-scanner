@@ -125,11 +125,11 @@ static uint8_t calc_brightness(const bd_s *bd, unsigned long now) {
 	if(age >= fadeout)
 		return 0;
 
-	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(BD_RSSI(bd)) : UINT8_MAX;
-
 	/* add ~2Hz on/off blinking for exposure notifications if persistence mode and ALLBLE enabled */
 	if((config & CF_PERSISTENCE_EN) && (config & CF_ALLBLE_EN) && (!(config & CF_RPIS_DONTBLINK)) && (BD_TYPE_RPI(bd)) && (now&0x100))
 		return 0;
+
+	val = config & CF_RSSI_BRIGHTNESS ? scale_rssi(BD_RSSI(bd)) : UINT8_MAX;
 
 	if(config & CF_FADEOUT_EN) {
 		uint32_t v32 = val;
@@ -447,7 +447,7 @@ static void visual_mode_change(uint8_t inc) {
  * A during reset: output unfiltered raw beacon data via serial interface
  * B during reset: sequential LED usage instead of randomized
  */
-void onLongClick(int btn_id) {
+static void onLongClick(int btn_id) {
 	if (btn_id == MICROBIT_ID_BUTTON_A)
 		config ^= CF_UART_EN;
 	else if (btn_id == MICROBIT_ID_BUTTON_B) {
@@ -456,13 +456,19 @@ void onLongClick(int btn_id) {
 	}
 }
 
-void onClick(int btn_id) {
+static void onClick(int btn_id) {
 	if (btn_id == MICROBIT_ID_BUTTON_A)
 		audio_mode_change();
     else if (btn_id == MICROBIT_ID_BUTTON_B)
 		visual_mode_change(1);
 }
 
+/*
+ * click-detection is done 'by hand' instead of using
+ * the message bus because the code shall work on micro:bit
+ * and Calliope Mini and Button B is mapped to a different
+ * input pin on the Calliope Mini
+ */
 static void button_service(void) {
 	static uint8_t btn_a_count = 0, btn_b_count = 0;
 
@@ -572,8 +578,7 @@ static void hw_detect(void) {
 	}
 }
 
-/* TODO:
- * 
+/*
  * further thoughts:
  * - better parser for advertisement data?
  * - serial: support serial commands? (e.g. RPI-to-UART en/disable?)
